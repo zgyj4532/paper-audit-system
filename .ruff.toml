@@ -1,0 +1,2 @@
+line-length = 88
+exclude = ["rust_engine/**", "venv/**", "target/**", "data/**"]

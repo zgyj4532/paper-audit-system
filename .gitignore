@@ -1,0 +1,25 @@
+__pycache__/
+*.pyc
+.env
+.venv/
+venv/
+ENV/
+env/
+/.mypy_cache
+/target/
+/rust_engine/target/
+uploads/
+outputs/
+data/
+*.db
+# Python-generated files
+__pycache__/
+*.py[oc]
+build/
+dist/
+wheels/
+*.egg-info
+*.docx
+
+# Virtual environments
+.venv
