@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import argparse
+from contextlib import asynccontextmanager
 import logging
 import os
 import shlex
@@ -23,18 +24,23 @@ from .config import settings
 log = logging.getLogger("paper_audit.main")
 _APP_START_TIME = time.time()
 
-app = FastAPI(title="paper-audit-python-service")
 _routes_loaded = False
 
 
-@app.on_event("startup")
-async def resume_checkpointed_tasks() -> None:
+@asynccontextmanager
+async def lifespan(app: FastAPI):
+    include_routes()
     try:
         from .api.audit import resume_recoverable_tasks
 
         await resume_recoverable_tasks()
     except Exception:
         log.exception("Failed to resume checkpointed tasks on startup")
+
+    yield
+
+
+app = FastAPI(title="paper-audit-python-service", lifespan=lifespan)
 
 
 @app.get("/health")
