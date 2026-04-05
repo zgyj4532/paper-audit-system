@@ -27,3 +27,6 @@ dev = [
 
 [tool.black]
 target-version = ["py311"]
+
+[tool.pytest.ini_options]
+norecursedirs = ["temp", "rust_engine/target"]
