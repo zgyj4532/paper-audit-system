@@ -1,8 +1,6 @@
 import pathlib
 import sys
 
-import pytest
-
 sys.path.insert(0, str(pathlib.Path(__file__).resolve().parents[1]))
 
 from python_service.paper_audit.services.rules.engine import check_text_rules

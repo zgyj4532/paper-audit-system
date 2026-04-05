@@ -26,8 +26,11 @@ async def list_tasks():
     await tq.init_db()
     # Retrieve all tasks
     import aiosqlite
+
     async with aiosqlite.connect(str(settings.SQLITE_DB_PATH)) as db:
-        cur = await db.execute("SELECT id, file_path, status, progress, result_path, error_message, created_at, current_stage, error_log, checkpoint_data, updated_at FROM tasks ORDER BY id DESC")
+        cur = await db.execute(
+            "SELECT id, file_path, status, progress, result_path, error_message, created_at, current_stage, error_log, checkpoint_data, updated_at FROM tasks ORDER BY id DESC"
+        )
         rows = await cur.fetchall()
     return [TaskQueue.row_to_dict(r) for r in rows]
 

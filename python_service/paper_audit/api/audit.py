@@ -34,7 +34,14 @@ def _decode_checkpoint(task: dict[str, Any] | None) -> dict[str, Any]:
     return {}
 
 
-async def _save_checkpoint(tq: TaskQueue, task_id: int, checkpoint: dict[str, Any], *, current_stage: str, progress: int) -> None:
+async def _save_checkpoint(
+    tq: TaskQueue,
+    task_id: int,
+    checkpoint: dict[str, Any],
+    *,
+    current_stage: str,
+    progress: int,
+) -> None:
     await tq.update_task(
         task_id,
         current_stage=current_stage,
@@ -55,10 +62,19 @@ async def _process_task(task_id: int, file_path: str, *, resume: bool = False) -
         report_path = output_dir / f"report_{task_id}.json"
         zip_path = output_dir / f"task_{task_id}.zip"
         task_row = await tq.get_task(task_id)
-        checkpoint = _decode_checkpoint(TaskQueue.row_to_dict(task_row) if task_row else None) if resume else {}
+        checkpoint = (
+            _decode_checkpoint(TaskQueue.row_to_dict(task_row) if task_row else None)
+            if resume
+            else {}
+        )
 
         try:
-            await tq.update_task(task_id, status="processing", progress=10, current_stage=checkpoint.get("stage", "parsing"))
+            await tq.update_task(
+                task_id,
+                status="processing",
+                progress=10,
+                current_stage=checkpoint.get("stage", "parsing"),
+            )
 
             parse_result = checkpoint.get("parse_result")
             parsed_data = checkpoint.get("parsed_data")
@@ -71,7 +87,9 @@ async def _process_task(task_id: int, file_path: str, *, resume: bool = False) -
                     "parse_result": parse_result,
                     "parsed_data": parsed_data,
                 }
-                await _save_checkpoint(tq, task_id, checkpoint, current_stage="parsing", progress=25)
+                await _save_checkpoint(
+                    tq, task_id, checkpoint, current_stage="parsing", progress=25
+                )
             else:
                 checkpoint.setdefault("stage", "parsed")
                 checkpoint.setdefault("source_file", absolute_file_path)
@@ -92,7 +110,9 @@ async def _process_task(task_id: int, file_path: str, *, resume: bool = False) -
                         "ai_review": ai_review,
                     }
                 )
-                await _save_checkpoint(tq, task_id, checkpoint, current_stage="ai_review", progress=55)
+                await _save_checkpoint(
+                    tq, task_id, checkpoint, current_stage="ai_review", progress=55
+                )
             else:
                 await tq.update_task(task_id, progress=55, current_stage="ai_review")
 
@@ -119,8 +139,14 @@ async def _process_task(task_id: int, file_path: str, *, resume: bool = False) -
                 "reference_verification": reference_results,
                 "chunk_reviews": chunk_reviews,
                 "annotated_path": annotated_path,
-                "issues_count": sum(item.get("issue_count", 0) for item in chunk_reviews)
-                + sum(1 for item in reference_results if item.get("verdict") not in {"verified", None, ""})
+                "issues_count": sum(
+                    item.get("issue_count", 0) for item in chunk_reviews
+                )
+                + sum(
+                    1
+                    for item in reference_results
+                    if item.get("verdict") not in {"verified", None, ""}
+                )
                 + len(consistency_issues),
             }
 
@@ -132,11 +158,16 @@ async def _process_task(task_id: int, file_path: str, *, resume: bool = False) -
                     "zip_path": str(zip_path),
                 }
             )
-            await _save_checkpoint(tq, task_id, checkpoint, current_stage="annotating", progress=90)
+            await _save_checkpoint(
+                tq, task_id, checkpoint, current_stage="annotating", progress=90
+            )
 
             should_write_report_json = report_payload["issues_count"] > 0
             if should_write_report_json:
-                report_path.write_text(json.dumps(report_payload, ensure_ascii=False, indent=2), encoding="utf-8")
+                report_path.write_text(
+                    json.dumps(report_payload, ensure_ascii=False, indent=2),
+                    encoding="utf-8",
+                )
             elif report_path.exists():
                 report_path.unlink()
 
@@ -155,7 +186,9 @@ async def _process_task(task_id: int, file_path: str, *, resume: bool = False) -
             except Exception:
                 pdf_path = None
 
-            with zipfile.ZipFile(zip_path, "w", compression=zipfile.ZIP_DEFLATED) as archive:
+            with zipfile.ZipFile(
+                zip_path, "w", compression=zipfile.ZIP_DEFLATED
+            ) as archive:
                 if annotated_path and Path(annotated_path).exists():
                     archive.write(annotated_path, arcname=Path(annotated_path).name)
                 if report_path.exists():
@@ -192,7 +225,9 @@ async def _process_task(task_id: int, file_path: str, *, resume: bool = False) -
                 current_stage="failed",
                 error_message=str(exc),
                 error_log=str(exc),
-                checkpoint_data=json.dumps(checkpoint, ensure_ascii=False) if checkpoint else None,
+                checkpoint_data=(
+                    json.dumps(checkpoint, ensure_ascii=False) if checkpoint else None
+                ),
             )
 
 
@@ -229,7 +264,11 @@ async def resume_task(task_id: int):
     if task.get("status") == "processing":
         raise HTTPException(status_code=409, detail="task already processing")
     asyncio.create_task(_process_task(task_id, str(task["file_path"]), resume=True))
-    return {"task_id": task_id, "status": "resuming", "checkpoint_stage": checkpoint.get("stage")}
+    return {
+        "task_id": task_id,
+        "status": "resuming",
+        "checkpoint_stage": checkpoint.get("stage"),
+    }
 
 
 @router.post("/api/v1/audit", status_code=202)
@@ -239,7 +278,11 @@ async def create_audit(
 ):
     upload_dir: Path = settings.PYTHON_UPLOAD_DIR
     upload_dir.mkdir(parents=True, exist_ok=True)
-    if file.content_type not in {None, "application/vnd.openxmlformats-officedocument.wordprocessingml.document", "application/octet-stream"}:
+    if file.content_type not in {
+        None,
+        "application/vnd.openxmlformats-officedocument.wordprocessingml.document",
+        "application/octet-stream",
+    }:
         raise HTTPException(status_code=400, detail="unsupported file type")
 
     config = {}

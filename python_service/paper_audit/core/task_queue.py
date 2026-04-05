@@ -2,7 +2,6 @@ import aiosqlite
 import asyncio
 from pathlib import Path
 
-
 TASK_COLUMNS = (
     "id",
     "file_path",
@@ -47,7 +46,9 @@ class TaskQueue:
                     columns = await cursor.fetchall()
                 column_names = {row[1] for row in columns}
                 if "checkpoint_data" not in column_names:
-                    await db.execute("ALTER TABLE tasks ADD COLUMN checkpoint_data TEXT")
+                    await db.execute(
+                        "ALTER TABLE tasks ADD COLUMN checkpoint_data TEXT"
+                    )
                 await db.commit()
 
     async def create_task(self, file_path: str) -> int:
@@ -118,7 +119,9 @@ class TaskQueue:
 
         values.append(task_id)
         async with aiosqlite.connect(self.db_path) as db:
-            await db.execute(f"UPDATE tasks SET {', '.join(updates)} WHERE id = ?", values)
+            await db.execute(
+                f"UPDATE tasks SET {', '.join(updates)} WHERE id = ?", values
+            )
             await db.commit()
 
     async def delete_task(self, task_id: int) -> None:

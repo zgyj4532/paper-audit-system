@@ -30,8 +30,12 @@ class PaperIndexRequest(BaseModel):
 
 
 class CleanupRequest(BaseModel):
-    upload_retention_days: int = Field(default_factory=lambda: settings.UPLOAD_RETENTION_DAYS)
-    report_retention_days: int = Field(default_factory=lambda: settings.REPORT_RETENTION_DAYS)
+    upload_retention_days: int = Field(
+        default_factory=lambda: settings.UPLOAD_RETENTION_DAYS
+    )
+    report_retention_days: int = Field(
+        default_factory=lambda: settings.REPORT_RETENTION_DAYS
+    )
     prune_completed_tasks: bool = False
     dry_run: bool = False
 
@@ -93,7 +97,9 @@ async def admin_index_paper(payload: PaperIndexRequest) -> dict[str, Any]:
     except ValueError as exc:
         raise HTTPException(status_code=400, detail=str(exc)) from exc
     except Exception as exc:
-        raise HTTPException(status_code=500, detail=f"failed to index paper: {exc}") from exc
+        raise HTTPException(
+            status_code=500, detail=f"failed to index paper: {exc}"
+        ) from exc
 
 
 @router.post("/api/v1/admin/cleanup")
@@ -104,7 +110,13 @@ async def admin_cleanup(payload: CleanupRequest) -> dict[str, Any]:
 
     files_to_delete: list[Path] = []
     files_to_delete.extend(_collect_files(temp_dir, ("*_parsed.json",)))
-    files_to_delete.extend([path for path in upload_dir.glob("*.*") if _should_delete(path, payload.upload_retention_days)])
+    files_to_delete.extend(
+        [
+            path
+            for path in upload_dir.glob("*.*")
+            if _should_delete(path, payload.upload_retention_days)
+        ]
+    )
     files_to_delete.extend(
         [
             path
@@ -113,10 +125,18 @@ async def admin_cleanup(payload: CleanupRequest) -> dict[str, Any]:
         ]
     )
     files_to_delete.extend(
-        [path for path in output_dir.glob("report_*.pdf") if _should_delete(path, payload.report_retention_days)]
+        [
+            path
+            for path in output_dir.glob("report_*.pdf")
+            if _should_delete(path, payload.report_retention_days)
+        ]
     )
     files_to_delete.extend(
-        [path for path in output_dir.glob("task_*.zip") if _should_delete(path, payload.report_retention_days)]
+        [
+            path
+            for path in output_dir.glob("task_*.zip")
+            if _should_delete(path, payload.report_retention_days)
+        ]
     )
 
     deleted_files: list[str] = []
@@ -133,7 +153,9 @@ async def admin_cleanup(payload: CleanupRequest) -> dict[str, Any]:
 
     pruned_tasks = 0
     if payload.prune_completed_tasks and not payload.dry_run:
-        tasks_to_prune = await _list_completed_tasks_older_than(payload.report_retention_days)
+        tasks_to_prune = await _list_completed_tasks_older_than(
+            payload.report_retention_days
+        )
         async with aiosqlite.connect(str(settings.SQLITE_DB_PATH)) as db:
             for task in tasks_to_prune:
                 await db.execute("DELETE FROM tasks WHERE id = ?", (task["id"],))

@@ -10,8 +10,12 @@ ROOT = Path(r"E:\github\paper-audit-system")
 sys.path.insert(0, str(ROOT))
 os.environ["PAPER_AUDIT_FAST_LOCAL_ONLY"] = "0"
 
+# ruff: noqa: E402
 from python_service.paper_audit.core import rust_client
-from python_service.paper_audit.services.llm import build_qwen_client, normalize_focus_areas
+from python_service.paper_audit.services.llm import (
+    build_qwen_client,
+    normalize_focus_areas,
+)
 from python_service.paper_audit.services.workflow.langgraph import (
     _batch_items,
     _dedupe_issues,
@@ -38,7 +42,9 @@ async def main():
     chunk_reviews = []
 
     for batch_index, batch in enumerate(_batch_items(chunks, BATCH_SIZE), start=1):
-        local_issue_sets = [check_text_rules(chunk["text"], focus_areas) for chunk in batch]
+        local_issue_sets = [
+            check_text_rules(chunk["text"], focus_areas) for chunk in batch
+        ]
         llm_issue_sets = await asyncio.gather(
             *[
                 client.review_chunk(
@@ -50,9 +56,16 @@ async def main():
                 for chunk in batch
             ]
         )
-        for chunk, local_issues, qwen_result in zip(batch, local_issue_sets, llm_issue_sets):
-            llm_issues = qwen_result.get("issues", []) if isinstance(qwen_result, dict) else []
-            merged_issues = _dedupe_issues(local_issues + [issue for issue in llm_issues if isinstance(issue, dict)])
+        for chunk, local_issues, qwen_result in zip(
+            batch, local_issue_sets, llm_issue_sets
+        ):
+            llm_issues = (
+                qwen_result.get("issues", []) if isinstance(qwen_result, dict) else []
+            )
+            merged_issues = _dedupe_issues(
+                local_issues
+                + [issue for issue in llm_issues if isinstance(issue, dict)]
+            )
             chunk_reviews.append(
                 {
                     "section_id": chunk.get("section_id"),
@@ -71,14 +84,18 @@ async def main():
                     "processed_chunks": len(chunk_reviews),
                     "total_chunks": len(chunks),
                     "current_batch": batch_index,
-                    "chunk_issue_count": sum(item.get("issue_count", 0) for item in chunk_reviews),
+                    "chunk_issue_count": sum(
+                        item.get("issue_count", 0) for item in chunk_reviews
+                    ),
                 },
                 ensure_ascii=False,
                 indent=2,
             ),
             encoding="utf-8",
         )
-        print(f"processed_batch={batch_index} processed_chunks={len(chunk_reviews)}/{len(chunks)}")
+        print(
+            f"processed_batch={batch_index} processed_chunks={len(chunk_reviews)}/{len(chunks)}"
+        )
 
     references = detect_reference_entries(parsed_data)
     reference_verification = await verify_references(references)
@@ -91,10 +108,16 @@ async def main():
         "reference_count": len(reference_verification),
         "chunk_issue_count": sum(item.get("issue_count", 0) for item in chunk_reviews),
         "consistency_issue_count": len(consistency_issues),
-        "first_5_chunk_counts": [item.get("issue_count", 0) for item in chunk_reviews[:5]],
-        "last_5_chunk_counts": [item.get("issue_count", 0) for item in chunk_reviews[-5:]],
+        "first_5_chunk_counts": [
+            item.get("issue_count", 0) for item in chunk_reviews[:5]
+        ],
+        "last_5_chunk_counts": [
+            item.get("issue_count", 0) for item in chunk_reviews[-5:]
+        ],
     }
-    SUMMARY_PATH.write_text(json.dumps(summary, ensure_ascii=False, indent=2), encoding="utf-8")
+    SUMMARY_PATH.write_text(
+        json.dumps(summary, ensure_ascii=False, indent=2), encoding="utf-8"
+    )
     print(json.dumps(summary, ensure_ascii=False, indent=2))
 
 

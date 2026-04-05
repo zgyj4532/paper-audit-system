@@ -8,6 +8,7 @@ from pathlib import Path
 ROOT = Path(r"E:\github\paper-audit-system")
 sys.path.insert(0, str(ROOT))
 
+# ruff: noqa: E402
 from python_service.paper_audit.config import settings
 from python_service.paper_audit.core.task_queue import TaskQueue
 

@@ -20,7 +20,13 @@ async def test_create_and_get_task(tmp_path):
     assert row[1] == "/tmp/example.docx"
     assert row[2] == "queued"
     assert row[3] == 0
-    await tq.update_task(task_id, status="done", progress=100, result_path="/tmp/result.zip", error_message=None)
+    await tq.update_task(
+        task_id,
+        status="done",
+        progress=100,
+        result_path="/tmp/result.zip",
+        error_message=None,
+    )
     updated = await tq.get_task(task_id)
     assert updated[2] == "done"
     assert updated[3] == 100

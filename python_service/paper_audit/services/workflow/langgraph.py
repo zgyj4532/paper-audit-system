@@ -25,7 +25,9 @@ class AuditState(TypedDict, total=False):
     backend: str
 
 
-def split_into_chunks(parsed_data: Dict[str, Any], chunk_size: int = 800, overlap: int = 100) -> List[Dict[str, Any]]:
+def split_into_chunks(
+    parsed_data: Dict[str, Any], chunk_size: int = 800, overlap: int = 100
+) -> List[Dict[str, Any]]:
     sections = parsed_data.get("sections", []) if isinstance(parsed_data, dict) else []
     chunks: List[Dict[str, Any]] = []
     for section in sections:
@@ -58,7 +60,9 @@ def _issue_span(issue: Dict[str, Any]) -> tuple[int | None, int | None]:
     return None, None
 
 
-def _is_same_issue(left: Dict[str, Any], right: Dict[str, Any], tolerance: int = 3) -> bool:
+def _is_same_issue(
+    left: Dict[str, Any], right: Dict[str, Any], tolerance: int = 3
+) -> bool:
     if left.get("issue_type") != right.get("issue_type"):
         return False
     if str(left.get("original", "")).strip() != str(right.get("original", "")).strip():
@@ -69,7 +73,10 @@ def _is_same_issue(left: Dict[str, Any], right: Dict[str, Any], tolerance: int =
     if left_start is None or right_start is None:
         return True
 
-    return abs(left_start - right_start) <= tolerance and abs(left_end - right_end) <= tolerance
+    return (
+        abs(left_start - right_start) <= tolerance
+        and abs(left_end - right_end) <= tolerance
+    )
 
 
 def _dedupe_issues(issues: List[Dict[str, Any]]) -> List[Dict[str, Any]]:
@@ -88,7 +95,9 @@ def _batch_items(items: List[Any], batch_size: int) -> List[List[Any]]:
     return [items[index : index + size] for index in range(0, len(items), size)]
 
 
-async def _review_chunk_with_qwen(client: Any, chunk: Dict[str, Any], focus_areas: List[str]) -> List[Dict[str, Any]]:
+async def _review_chunk_with_qwen(
+    client: Any, chunk: Dict[str, Any], focus_areas: List[str]
+) -> List[Dict[str, Any]]:
     try:
         qwen_result = await client.review_chunk(
             chunk["text"],
@@ -99,14 +108,25 @@ async def _review_chunk_with_qwen(client: Any, chunk: Dict[str, Any], focus_area
         issues = qwen_result.get("issues", []) if isinstance(qwen_result, dict) else []
         return [issue for issue in issues if isinstance(issue, dict)]
     except Exception as exc:
-        return [{"issue_type": "review_error", "severity": 1, "message": str(exc), "suggestion": "retry later"}]
+        return [
+            {
+                "issue_type": "review_error",
+                "severity": 1,
+                "message": str(exc),
+                "suggestion": "retry later",
+            }
+        ]
 
 
-async def _verify_reference_with_qwen(client: Any, reference: Dict[str, Any]) -> Dict[str, Any]:
+async def _verify_reference_with_qwen(
+    client: Any, reference: Dict[str, Any]
+) -> Dict[str, Any]:
     text = reference.get("text") or reference.get("raw_text") or str(reference)
     retrieved = query_papers(text, n_results=3) if text else []
     try:
-        qwen_result = await client.verify_reference(text, retrieved, backend_hint="qwen")
+        qwen_result = await client.verify_reference(
+            text, retrieved, backend_hint="qwen"
+        )
         return {
             "reference": reference,
             "retrieved": retrieved,
@@ -157,7 +177,11 @@ async def verify_references(references: List[Dict[str, Any]]) -> List[Dict[str, 
             local_result = _verify_reference_with_local(reference)
             if _fast_local_only():
                 local_result["reason"] = "fast_local_only"
-                local_result["risk_flags"] = list(dict.fromkeys(["fast_local_only", *local_result.get("risk_flags", [])]))
+                local_result["risk_flags"] = list(
+                    dict.fromkeys(
+                        ["fast_local_only", *local_result.get("risk_flags", [])]
+                    )
+                )
             results.append(local_result)
         return results
 
@@ -165,13 +189,17 @@ async def verify_references(references: List[Dict[str, Any]]) -> List[Dict[str, 
     batch_size = max(1, int(getattr(settings, "LLM_QWEN_BATCH_SIZE", 4)))
 
     for batch in _batch_items(list(references), batch_size):
-        batch_results = await asyncio.gather(*[_verify_reference_with_qwen(client, reference) for reference in batch])
+        batch_results = await asyncio.gather(
+            *[_verify_reference_with_qwen(client, reference) for reference in batch]
+        )
         if can_use_local_reference_verifier():
             for index, item in enumerate(batch_results):
                 if not isinstance(item, dict):
                     continue
                 risk_flags = set(item.get("risk_flags", []))
-                if "llm_error" in risk_flags or (backend == "auto" and item.get("verdict") == "unverified"):
+                if "llm_error" in risk_flags or (
+                    backend == "auto" and item.get("verdict") == "unverified"
+                ):
                     batch_results[index] = _verify_reference_with_local(batch[index])
         results.extend(batch_results)
 
@@ -188,16 +216,26 @@ async def review_document(parsed_data: Dict[str, Any]) -> Dict[str, Any]:
     batch_size = max(1, int(getattr(settings, "LLM_QWEN_BATCH_SIZE", 4)))
 
     for batch in _batch_items(chunks, batch_size):
-        local_issue_sets = [check_text_rules(chunk["text"], focus_areas) for chunk in batch]
+        local_issue_sets = [
+            check_text_rules(chunk["text"], focus_areas) for chunk in batch
+        ]
         if fast_local_only or client is None:
             llm_issue_sets = [[] for _ in batch]
         else:
             llm_issue_sets = await asyncio.gather(
-                *[_review_chunk_with_qwen(client, chunk, focus_areas) for chunk in batch]
+                *[
+                    _review_chunk_with_qwen(client, chunk, focus_areas)
+                    for chunk in batch
+                ]
             )
 
-        for chunk, local_issues, llm_issues in zip(batch, local_issue_sets, llm_issue_sets):
-            merged_issues = _dedupe_issues(local_issues + [issue for issue in llm_issues if isinstance(issue, dict)])
+        for chunk, local_issues, llm_issues in zip(
+            batch, local_issue_sets, llm_issue_sets
+        ):
+            merged_issues = _dedupe_issues(
+                local_issues
+                + [issue for issue in llm_issues if isinstance(issue, dict)]
+            )
             chunk_reviews.append(
                 {
                     "section_id": chunk.get("section_id"),
@@ -222,7 +260,9 @@ async def review_document(parsed_data: Dict[str, Any]) -> Dict[str, Any]:
         "summary": {
             "chunk_count": len(chunks),
             "reference_count": len(references),
-            "chunk_issue_count": sum(item.get("issue_count", 0) for item in chunk_reviews),
+            "chunk_issue_count": sum(
+                item.get("issue_count", 0) for item in chunk_reviews
+            ),
             "consistency_issue_count": len(consistency_issues),
             "qwen_batch_size": batch_size,
         },

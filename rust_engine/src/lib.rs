@@ -1,24 +1,31 @@
-pub mod parser;
 pub mod annotator;
+pub mod parser;
 
 #[cfg(test)]
 mod tests {
     #[test]
     fn test_parser_missing() {
-        let r = crate::parser::parse_document("nonexistent_file.txt", &crate::parser::ParseOptions::default());
+        let r = crate::parser::parse_document(
+            "nonexistent_file.txt",
+            &crate::parser::ParseOptions::default(),
+        );
         assert!(r.get("error").is_some());
     }
 
     #[test]
     fn test_annotator_copy_fail() {
-        let res = crate::annotator::annotate_document("nonexistent.docx", &serde_json::json!([]), None);
+        let res =
+            crate::annotator::annotate_document("nonexistent.docx", &serde_json::json!([]), None);
         assert!(res.is_err());
     }
 }
 
-use axum::{extract::Json, routing::{get, post}, Router};
+use axum::{
+    extract::Json,
+    routing::{get, post},
+    Router,
+};
 use serde::Deserialize;
-
 
 #[derive(Deserialize)]
 struct ParseRequest {

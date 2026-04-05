@@ -60,14 +60,18 @@ fn temp_output_path(input_path: &Path) -> PathBuf {
     let mut out_dir = PathBuf::from(base);
     out_dir.push("rust_parse");
     let _ = fs::create_dir_all(&out_dir);
-    let stem = input_path.file_stem().and_then(|s| s.to_str()).unwrap_or("document");
+    let stem = input_path
+        .file_stem()
+        .and_then(|s| s.to_str())
+        .unwrap_or("document");
     out_dir.push(format!("{}_parsed.json", stem));
     out_dir
 }
 
 fn read_docx_member(path: &Path, member_name: &str) -> Result<String, String> {
     let file = fs::File::open(path).map_err(|e| format!("failed to open file: {}", e))?;
-    let mut archive = ZipArchive::new(file).map_err(|e| format!("failed to open docx archive: {}", e))?;
+    let mut archive =
+        ZipArchive::new(file).map_err(|e| format!("failed to open docx archive: {}", e))?;
     let mut member = archive
         .by_name(member_name)
         .map_err(|e| format!("failed to read {}: {}", member_name, e))?;
@@ -124,7 +128,9 @@ fn read_relationships(path: &Path) -> HashMap<String, String> {
 
     loop {
         match reader.read_event_into(&mut buf) {
-            Ok(Event::Start(e)) | Ok(Event::Empty(e)) if e.local_name().as_ref() == b"Relationship" => {
+            Ok(Event::Start(e)) | Ok(Event::Empty(e))
+                if e.local_name().as_ref() == b"Relationship" =>
+            {
                 let id = attr_value(&e, b"Id");
                 let target = attr_value(&e, b"Target");
                 if let (Some(id), Some(target)) = (id, target) {
@@ -184,37 +190,56 @@ fn read_styles(path: &Path) -> (TextFormat, HashMap<String, TextFormat>) {
                 }
                 in_style = false;
             }
-            Ok(Event::Start(e)) | Ok(Event::Empty(e)) if in_doc_defaults && e.local_name().as_ref() == b"rFonts" => {
+            Ok(Event::Start(e)) | Ok(Event::Empty(e))
+                if in_doc_defaults && e.local_name().as_ref() == b"rFonts" =>
+            {
                 if defaults.font.is_none() {
                     defaults.font = attr_value(&e, b"eastAsia")
                         .or_else(|| attr_value(&e, b"ascii"))
                         .or_else(|| attr_value(&e, b"hAnsi"));
                 }
             }
-            Ok(Event::Start(e)) | Ok(Event::Empty(e)) if in_doc_defaults && (e.local_name().as_ref() == b"sz" || e.local_name().as_ref() == b"szCs") => {
+            Ok(Event::Start(e)) | Ok(Event::Empty(e))
+                if in_doc_defaults
+                    && (e.local_name().as_ref() == b"sz" || e.local_name().as_ref() == b"szCs") =>
+            {
                 if defaults.size_pt.is_none() {
                     defaults.size_pt = attr_value(&e, b"val").and_then(|v| parse_size_pt(&v));
                 }
             }
-            Ok(Event::Start(e)) | Ok(Event::Empty(e)) if in_style && e.local_name().as_ref() == b"basedOn" => {
+            Ok(Event::Start(e)) | Ok(Event::Empty(e))
+                if in_style && e.local_name().as_ref() == b"basedOn" =>
+            {
                 current_style_parent = attr_value(&e, b"val");
             }
-            Ok(Event::Start(e)) | Ok(Event::Empty(e)) if in_style && e.local_name().as_ref() == b"rFonts" => {
+            Ok(Event::Start(e)) | Ok(Event::Empty(e))
+                if in_style && e.local_name().as_ref() == b"rFonts" =>
+            {
                 current_style_format.font = attr_value(&e, b"eastAsia")
                     .or_else(|| attr_value(&e, b"ascii"))
                     .or_else(|| attr_value(&e, b"hAnsi"))
                     .or_else(|| current_style_format.font.clone());
             }
-            Ok(Event::Start(e)) | Ok(Event::Empty(e)) if in_style && (e.local_name().as_ref() == b"sz" || e.local_name().as_ref() == b"szCs") => {
-                current_style_format.size_pt = attr_value(&e, b"val").and_then(|v| parse_size_pt(&v));
+            Ok(Event::Start(e)) | Ok(Event::Empty(e))
+                if in_style
+                    && (e.local_name().as_ref() == b"sz" || e.local_name().as_ref() == b"szCs") =>
+            {
+                current_style_format.size_pt =
+                    attr_value(&e, b"val").and_then(|v| parse_size_pt(&v));
             }
-            Ok(Event::Start(e)) | Ok(Event::Empty(e)) if in_style && e.local_name().as_ref() == b"b" => {
+            Ok(Event::Start(e)) | Ok(Event::Empty(e))
+                if in_style && e.local_name().as_ref() == b"b" =>
+            {
                 current_style_format.bold = Some(true);
             }
-            Ok(Event::Start(e)) | Ok(Event::Empty(e)) if in_style && e.local_name().as_ref() == b"color" => {
+            Ok(Event::Start(e)) | Ok(Event::Empty(e))
+                if in_style && e.local_name().as_ref() == b"color" =>
+            {
                 current_style_format.color = attr_value(&e, b"val");
             }
-            Ok(Event::Start(e)) | Ok(Event::Empty(e)) if in_style && e.local_name().as_ref() == b"rStyle" => {
+            Ok(Event::Start(e)) | Ok(Event::Empty(e))
+                if in_style && e.local_name().as_ref() == b"rStyle" =>
+            {
                 current_style_format.style = attr_value(&e, b"val");
             }
             Ok(Event::Eof) => break,
@@ -410,34 +435,50 @@ fn extract_sections(
             Ok(Event::End(e)) if e.local_name().as_ref() == b"rPr" => {
                 in_para_run_pr = false;
             }
-            Ok(Event::Start(e)) | Ok(Event::Empty(e)) if in_para_props && e.local_name().as_ref() == b"pStyle" => {
+            Ok(Event::Start(e)) | Ok(Event::Empty(e))
+                if in_para_props && e.local_name().as_ref() == b"pStyle" =>
+            {
                 current_paragraph_style = attr_value(&e, b"val");
                 if let Some(style_id) = current_paragraph_style.as_deref() {
                     if let Some(style_format) = styles.get(style_id) {
-                        current_paragraph_format = merge_format(&current_paragraph_format, style_format);
+                        current_paragraph_format =
+                            merge_format(&current_paragraph_format, style_format);
                     }
                 }
             }
-            Ok(Event::Start(e)) | Ok(Event::Empty(e)) if in_para_run_pr && e.local_name().as_ref() == b"rFonts" => {
+            Ok(Event::Start(e)) | Ok(Event::Empty(e))
+                if in_para_run_pr && e.local_name().as_ref() == b"rFonts" =>
+            {
                 current_paragraph_format.font = attr_value(&e, b"eastAsia")
                     .or_else(|| attr_value(&e, b"ascii"))
                     .or_else(|| attr_value(&e, b"hAnsi"))
                     .or_else(|| current_paragraph_format.font.clone());
             }
-            Ok(Event::Start(e)) | Ok(Event::Empty(e)) if in_para_run_pr && (e.local_name().as_ref() == b"sz" || e.local_name().as_ref() == b"szCs") => {
-                current_paragraph_format.size_pt = attr_value(&e, b"val").and_then(|v| parse_size_pt(&v));
+            Ok(Event::Start(e)) | Ok(Event::Empty(e))
+                if in_para_run_pr
+                    && (e.local_name().as_ref() == b"sz" || e.local_name().as_ref() == b"szCs") =>
+            {
+                current_paragraph_format.size_pt =
+                    attr_value(&e, b"val").and_then(|v| parse_size_pt(&v));
             }
-            Ok(Event::Start(e)) | Ok(Event::Empty(e)) if in_para_run_pr && e.local_name().as_ref() == b"b" => {
+            Ok(Event::Start(e)) | Ok(Event::Empty(e))
+                if in_para_run_pr && e.local_name().as_ref() == b"b" =>
+            {
                 current_paragraph_format.bold = Some(true);
             }
-            Ok(Event::Start(e)) | Ok(Event::Empty(e)) if in_para_run_pr && e.local_name().as_ref() == b"color" => {
+            Ok(Event::Start(e)) | Ok(Event::Empty(e))
+                if in_para_run_pr && e.local_name().as_ref() == b"color" =>
+            {
                 current_paragraph_format.color = attr_value(&e, b"val");
             }
-            Ok(Event::Start(e)) | Ok(Event::Empty(e)) if in_para_run_pr && e.local_name().as_ref() == b"rStyle" => {
+            Ok(Event::Start(e)) | Ok(Event::Empty(e))
+                if in_para_run_pr && e.local_name().as_ref() == b"rStyle" =>
+            {
                 current_paragraph_format.style = attr_value(&e, b"val");
                 if let Some(style_id) = current_paragraph_format.style.as_deref() {
                     if let Some(style_format) = styles.get(style_id) {
-                        current_paragraph_format = merge_format(&current_paragraph_format, style_format);
+                        current_paragraph_format =
+                            merge_format(&current_paragraph_format, style_format);
                     }
                 }
             }
@@ -462,10 +503,16 @@ fn extract_sections(
                 in_text = false;
                 in_run_pr = false;
             }
-            Ok(Event::Start(e)) | Ok(Event::Empty(e)) if (e.local_name().as_ref() == b"oMath") || (e.local_name().as_ref() == b"oMathPara") => {
+            Ok(Event::Start(e)) | Ok(Event::Empty(e))
+                if (e.local_name().as_ref() == b"oMath")
+                    || (e.local_name().as_ref() == b"oMathPara") =>
+            {
                 current_paragraph_has_math = true;
             }
-            Ok(Event::Start(e)) | Ok(Event::Empty(e)) if e.local_name().as_ref() == b"blip" || e.local_name().as_ref() == b"imagedata" => {
+            Ok(Event::Start(e)) | Ok(Event::Empty(e))
+                if e.local_name().as_ref() == b"blip"
+                    || e.local_name().as_ref() == b"imagedata" =>
+            {
                 let embed = attr_value(&e, b"embed").or_else(|| attr_value(&e, b"id"));
                 if let Some(embed) = embed {
                     let target = image_targets.get(&embed).cloned().unwrap_or(embed.clone());
@@ -478,22 +525,33 @@ fn extract_sections(
             Ok(Event::End(e)) if e.local_name().as_ref() == b"rPr" => {
                 in_run_pr = false;
             }
-            Ok(Event::Start(e)) | Ok(Event::Empty(e)) if in_run_pr && e.local_name().as_ref() == b"rFonts" => {
+            Ok(Event::Start(e)) | Ok(Event::Empty(e))
+                if in_run_pr && e.local_name().as_ref() == b"rFonts" =>
+            {
                 current_run.format.font = attr_value(&e, b"eastAsia")
                     .or_else(|| attr_value(&e, b"ascii"))
                     .or_else(|| attr_value(&e, b"hAnsi"))
                     .or_else(|| current_run.format.font.clone());
             }
-            Ok(Event::Start(e)) | Ok(Event::Empty(e)) if in_run_pr && (e.local_name().as_ref() == b"sz" || e.local_name().as_ref() == b"szCs") => {
+            Ok(Event::Start(e)) | Ok(Event::Empty(e))
+                if in_run_pr
+                    && (e.local_name().as_ref() == b"sz" || e.local_name().as_ref() == b"szCs") =>
+            {
                 current_run.format.size_pt = attr_value(&e, b"val").and_then(|v| parse_size_pt(&v));
             }
-            Ok(Event::Start(e)) | Ok(Event::Empty(e)) if in_run_pr && e.local_name().as_ref() == b"b" => {
+            Ok(Event::Start(e)) | Ok(Event::Empty(e))
+                if in_run_pr && e.local_name().as_ref() == b"b" =>
+            {
                 current_run.format.bold = Some(true);
             }
-            Ok(Event::Start(e)) | Ok(Event::Empty(e)) if in_run_pr && e.local_name().as_ref() == b"color" => {
+            Ok(Event::Start(e)) | Ok(Event::Empty(e))
+                if in_run_pr && e.local_name().as_ref() == b"color" =>
+            {
                 current_run.format.color = attr_value(&e, b"val");
             }
-            Ok(Event::Start(e)) | Ok(Event::Empty(e)) if in_run_pr && e.local_name().as_ref() == b"rStyle" => {
+            Ok(Event::Start(e)) | Ok(Event::Empty(e))
+                if in_run_pr && e.local_name().as_ref() == b"rStyle" =>
+            {
                 current_run.format.style = attr_value(&e, b"val");
                 if let Some(style_id) = current_run.format.style.as_deref() {
                     if let Some(style_format) = styles.get(style_id) {
@@ -549,7 +607,9 @@ fn build_response(
     options: &ParseOptions,
 ) -> serde_json::Value {
     let inferred_default_size = defaults.size_pt.clone().or_else(|| {
-        sections_input.iter().find_map(|section| section.format.size_pt.clone())
+        sections_input
+            .iter()
+            .find_map(|section| section.format.size_pt.clone())
     });
     let mut last_known_size: Option<String> = defaults.size_pt.clone();
     let mut last_known_size_by_page: HashMap<usize, String> = HashMap::new();
@@ -726,7 +786,8 @@ pub fn parse_document(path: &str, options: &ParseOptions) -> serde_json::Value {
         .and_then(|ext| ext.to_str())
         .map(|s| s.to_lowercase())
     {
-        Some(ext) if ext == "docx" => match read_docx_member(&canonical_input, "word/document.xml") {
+        Some(ext) if ext == "docx" => match read_docx_member(&canonical_input, "word/document.xml")
+        {
             Ok(xml) => extract_sections(&xml, &defaults, &styles, &image_targets),
             Err(err) => return json!({"success": false, "error": err, "path": path}),
         },

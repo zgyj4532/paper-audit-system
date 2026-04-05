@@ -1,7 +1,7 @@
 use serde_json::Value;
 use std::fs;
-use std::path::{Path, PathBuf};
 use std::io::{Read, Write};
+use std::path::{Path, PathBuf};
 use zip::write::SimpleFileOptions;
 
 fn temp_output_dir() -> PathBuf {
@@ -13,12 +13,17 @@ fn temp_output_dir() -> PathBuf {
 }
 
 fn default_output_filename(original_path: &Path) -> String {
-    let stem = original_path.file_stem().and_then(|s| s.to_str()).unwrap_or("document");
+    let stem = original_path
+        .file_stem()
+        .and_then(|s| s.to_str())
+        .unwrap_or("document");
     format!("{}_annotated.docx", stem)
 }
 
 fn read_zip_xml(archive: &mut zip::ZipArchive<fs::File>, name: &str) -> Result<String, String> {
-    let mut member = archive.by_name(name).map_err(|e| format!("failed to read {}: {}", name, e))?;
+    let mut member = archive
+        .by_name(name)
+        .map_err(|e| format!("failed to read {}: {}", name, e))?;
     let mut xml = String::new();
     member
         .read_to_string(&mut xml)
@@ -104,7 +109,8 @@ pub fn annotate_document(
 
     // Create annotated docx by modifying document.xml and adding comments.xml
     let file = fs::File::open(input).map_err(|e| format!("failed to open input docx: {}", e))?;
-    let mut archive = zip::ZipArchive::new(file).map_err(|e| format!("failed to open docx archive: {}", e))?;
+    let mut archive =
+        zip::ZipArchive::new(file).map_err(|e| format!("failed to open docx archive: {}", e))?;
 
     // Read original document.xml
     let mut doc_xml = read_zip_xml(&mut archive, "word/document.xml")?;
@@ -173,12 +179,16 @@ pub fn annotate_document(
         let mut doc_len = doc_xml.len();
         for (mut pos, content) in insertions {
             // clamp position
-            if pos > doc_len { pos = doc_len; }
+            if pos > doc_len {
+                pos = doc_len;
+            }
             // move to next valid UTF-8 char boundary if needed
             while pos < doc_len && !doc_xml.is_char_boundary(pos) {
                 pos += 1;
             }
-            if pos > doc_len { pos = doc_len; }
+            if pos > doc_len {
+                pos = doc_len;
+            }
             doc_xml.insert_str(pos, &content);
             // update doc_len since we've mutated the string
             doc_len = doc_xml.len();
@@ -194,18 +204,27 @@ pub fn annotate_document(
     }
 
     // Build comments.xml content
-    let mut comments_xml = String::from(r#"<?xml version="1.0" encoding="UTF-8" standalone="yes"?>
+    let mut comments_xml = String::from(
+        r#"<?xml version="1.0" encoding="UTF-8" standalone="yes"?>
 <w:comments xmlns:w="http://schemas.openxmlformats.org/wordprocessingml/2006/main">
-"#);
+"#,
+    );
     for (id, text) in &comments {
-        comments_xml.push_str(&format!("  <w:comment w:id=\"{}\" w:author=\"paper-audit\">", id));
-        comments_xml.push_str(&format!("<w:p><w:r><w:t>{}</w:t></w:r></w:p>", xml_escape(text)));
+        comments_xml.push_str(&format!(
+            "  <w:comment w:id=\"{}\" w:author=\"paper-audit\">",
+            id
+        ));
+        comments_xml.push_str(&format!(
+            "<w:p><w:r><w:t>{}</w:t></w:r></w:p>",
+            xml_escape(text)
+        ));
         comments_xml.push_str("</w:comment>\n");
     }
     comments_xml.push_str("</w:comments>");
 
     // Create new zip with modified document.xml and comments.xml
-    let out_file = fs::File::create(&dest).map_err(|e| format!("failed to create output file: {}", e))?;
+    let out_file =
+        fs::File::create(&dest).map_err(|e| format!("failed to create output file: {}", e))?;
     let mut writer = zip::ZipWriter::new(out_file);
     // use default FileOptions inline to avoid type-inference ambiguity
 
@@ -213,46 +232,82 @@ pub fn annotate_document(
     let mut has_document_rels = false;
     let mut has_content_types = false;
     for i in 0..archive.len() {
-        let mut file = archive.by_index(i).map_err(|e| format!("zip read error: {}", e))?;
+        let mut file = archive
+            .by_index(i)
+            .map_err(|e| format!("zip read error: {}", e))?;
         let name = file.name().to_string();
         // binary-safe read
         let mut buffer = Vec::new();
-        file.read_to_end(&mut buffer).map_err(|e| format!("failed reading entry: {}", e))?;
+        file.read_to_end(&mut buffer)
+            .map_err(|e| format!("failed reading entry: {}", e))?;
         if name == "word/document.xml" {
-            writer.start_file(name, SimpleFileOptions::default()).map_err(|e| format!("zip write error: {}", e))?;
-            writer.write_all(doc_xml.as_bytes()).map_err(|e| format!("failed to write document.xml: {}", e))?;
+            writer
+                .start_file(name, SimpleFileOptions::default())
+                .map_err(|e| format!("zip write error: {}", e))?;
+            writer
+                .write_all(doc_xml.as_bytes())
+                .map_err(|e| format!("failed to write document.xml: {}", e))?;
         } else if name == "word/_rels/document.xml.rels" {
             has_document_rels = true;
-            writer.start_file(name, SimpleFileOptions::default()).map_err(|e| format!("zip write error: {}", e))?;
-            writer.write_all(rels_xml.as_bytes()).map_err(|e| format!("failed to write document.xml.rels: {}", e))?;
+            writer
+                .start_file(name, SimpleFileOptions::default())
+                .map_err(|e| format!("zip write error: {}", e))?;
+            writer
+                .write_all(rels_xml.as_bytes())
+                .map_err(|e| format!("failed to write document.xml.rels: {}", e))?;
         } else if name == "[Content_Types].xml" {
             has_content_types = true;
-            writer.start_file(name, SimpleFileOptions::default()).map_err(|e| format!("zip write error: {}", e))?;
-            writer.write_all(content_types_xml.as_bytes()).map_err(|e| format!("failed to write [Content_Types].xml: {}", e))?;
+            writer
+                .start_file(name, SimpleFileOptions::default())
+                .map_err(|e| format!("zip write error: {}", e))?;
+            writer
+                .write_all(content_types_xml.as_bytes())
+                .map_err(|e| format!("failed to write [Content_Types].xml: {}", e))?;
         } else {
-            writer.start_file(name, SimpleFileOptions::default()).map_err(|e| format!("zip write error: {}", e))?;
-            writer.write_all(&buffer).map_err(|e| format!("failed to write entry: {}", e))?;
+            writer
+                .start_file(name, SimpleFileOptions::default())
+                .map_err(|e| format!("zip write error: {}", e))?;
+            writer
+                .write_all(&buffer)
+                .map_err(|e| format!("failed to write entry: {}", e))?;
         }
     }
 
     if comments_enabled && !has_document_rels {
-        writer.start_file("word/_rels/document.xml.rels", SimpleFileOptions::default()).map_err(|e| format!("zip write error: {}", e))?;
-        writer.write_all(rels_xml.as_bytes()).map_err(|e| format!("failed to write document.xml.rels: {}", e))?;
+        writer
+            .start_file("word/_rels/document.xml.rels", SimpleFileOptions::default())
+            .map_err(|e| format!("zip write error: {}", e))?;
+        writer
+            .write_all(rels_xml.as_bytes())
+            .map_err(|e| format!("failed to write document.xml.rels: {}", e))?;
     }
 
     if comments_enabled && !has_content_types {
-        writer.start_file("[Content_Types].xml", SimpleFileOptions::default()).map_err(|e| format!("zip write error: {}", e))?;
-        writer.write_all(content_types_xml.as_bytes()).map_err(|e| format!("failed to write [Content_Types].xml: {}", e))?;
+        writer
+            .start_file("[Content_Types].xml", SimpleFileOptions::default())
+            .map_err(|e| format!("zip write error: {}", e))?;
+        writer
+            .write_all(content_types_xml.as_bytes())
+            .map_err(|e| format!("failed to write [Content_Types].xml: {}", e))?;
     }
 
     // add comments.xml
     if comments_enabled {
-        writer.start_file("word/comments.xml", SimpleFileOptions::default()).map_err(|e| format!("zip write error: {}", e))?;
-        writer.write_all(comments_xml.as_bytes()).map_err(|e| format!("failed to write comments.xml: {}", e))?;
+        writer
+            .start_file("word/comments.xml", SimpleFileOptions::default())
+            .map_err(|e| format!("zip write error: {}", e))?;
+        writer
+            .write_all(comments_xml.as_bytes())
+            .map_err(|e| format!("failed to write comments.xml: {}", e))?;
     }
-    writer.finish().map_err(|e| format!("failed to finish zip: {}", e))?;
+    writer
+        .finish()
+        .map_err(|e| format!("failed to finish zip: {}", e))?;
 
-    let file_size_kb = fs::metadata(&dest).map_err(|e| format!("failed to stat output file: {}", e))?.len() / 1024;
+    let file_size_kb = fs::metadata(&dest)
+        .map_err(|e| format!("failed to stat output file: {}", e))?
+        .len()
+        / 1024;
 
     Ok(serde_json::json!({
         "success": true,
@@ -278,5 +333,7 @@ fn extract_paragraph_index(xml_path: &str) -> Option<usize> {
 }
 
 fn xml_escape(s: &str) -> String {
-    s.replace('&', "&amp;").replace('<', "&lt;").replace('>', "&gt;")
+    s.replace('&', "&amp;")
+        .replace('<', "&lt;")
+        .replace('>', "&gt;")
 }

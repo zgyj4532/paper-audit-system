@@ -21,7 +21,9 @@ from python_service.paper_audit.config import settings
 async def test_health_endpoint_includes_system_info():
     pa_main.include_routes()
     app = pa_main.app
-    async with AsyncClient(transport=ASGITransport(app=app), base_url="http://testserver") as ac:
+    async with AsyncClient(
+        transport=ASGITransport(app=app), base_url="http://testserver"
+    ) as ac:
         resp = await ac.get("/health")
         assert resp.status_code == 200
         data = resp.json()
@@ -40,29 +42,62 @@ async def test_audit_endpoint(tmp_path, monkeypatch):
     async def fake_parse(file_path: str):
         return {"sections": [{"title": "intro"}], "styles": {}}
 
-    async def fake_annotate(original_path: str, issues: list, output_filename: str | None = None):
+    async def fake_annotate(
+        original_path: str, issues: list, output_filename: str | None = None
+    ):
         out_dir = settings.PYTHON_OUTPUT_DIR
         out_dir.mkdir(parents=True, exist_ok=True)
         out_file = out_dir / (output_filename or "annotated.docx")
         out_file.write_bytes(b"dummy docx")
-        return {"success": True, "output_path": str(out_file), "stats": {"comments_injected": len(issues), "file_size_kb": 1}}
+        return {
+            "success": True,
+            "output_path": str(out_file),
+            "stats": {"comments_injected": len(issues), "file_size_kb": 1},
+        }
 
     async def fake_review_document(parsed_data: dict):
         return {
             "backend": "qwen",
             "chunks": [{"section_id": 1, "text": "intro"}],
-            "chunk_reviews": [{"section_id": 1, "issues": [{"issue_type": "format", "severity": 1, "message": "ok", "suggestion": "none"}]}],
-            "reference_verification": [{"reference": {"text": "[1] Example"}, "verdict": "verified", "reason": "mock", "retrieved": []}],
+            "chunk_reviews": [
+                {
+                    "section_id": 1,
+                    "issues": [
+                        {
+                            "issue_type": "format",
+                            "severity": 1,
+                            "message": "ok",
+                            "suggestion": "none",
+                        }
+                    ],
+                    "issue_count": 1,
+                }
+            ],
+            "reference_verification": [
+                {
+                    "reference": {"text": "[1] Example"},
+                    "verdict": "verified",
+                    "reason": "mock",
+                    "retrieved": [],
+                }
+            ],
         }
 
     monkeypatch.setattr("python_service.paper_audit.core.rust_client.parse", fake_parse)
-    monkeypatch.setattr("python_service.paper_audit.core.rust_client.annotate", fake_annotate)
-    monkeypatch.setattr("python_service.paper_audit.core.langgraph.review_document", fake_review_document)
+    monkeypatch.setattr(
+        "python_service.paper_audit.core.rust_client.annotate", fake_annotate
+    )
+    monkeypatch.setattr(
+        "python_service.paper_audit.core.langgraph.review_document",
+        fake_review_document,
+    )
 
     # ensure routes are included (main.run() would do this in production)
     pa_main.include_routes()
     app = pa_main.app
-    async with AsyncClient(transport=ASGITransport(app=app), base_url="http://testserver") as ac:
+    async with AsyncClient(
+        transport=ASGITransport(app=app), base_url="http://testserver"
+    ) as ac:
         files = {"file": ("test.docx", b"dummy content")}
         resp = await ac.post("/api/v1/audit", files=files)
         assert resp.status_code == 202
@@ -112,7 +147,9 @@ async def test_report_requires_completed_task(tmp_path, monkeypatch):
 
     pa_main.include_routes()
     app = pa_main.app
-    async with AsyncClient(transport=ASGITransport(app=app), base_url="http://testserver") as ac:
+    async with AsyncClient(
+        transport=ASGITransport(app=app), base_url="http://testserver"
+    ) as ac:
         from python_service.paper_audit.core.task_queue import TaskQueue
 
         tq = TaskQueue(str(settings.SQLITE_DB_PATH))
@@ -130,7 +167,9 @@ async def test_admin_index_paper(tmp_path, monkeypatch):
 
     pa_main.include_routes()
     app = pa_main.app
-    async with AsyncClient(transport=ASGITransport(app=app), base_url="http://testserver") as ac:
+    async with AsyncClient(
+        transport=ASGITransport(app=app), base_url="http://testserver"
+    ) as ac:
         payload = {
             "id": "paper-001",
             "title": "Deep Learning for Testing",
@@ -149,7 +188,9 @@ async def test_admin_index_paper(tmp_path, monkeypatch):
 
         from python_service.paper_audit.services.vector.store import query_papers
 
-        matches = query_papers("testing workflows improve with deep learning", n_results=1)
+        matches = query_papers(
+            "testing workflows improve with deep learning", n_results=1
+        )
         assert matches
         assert matches[0]["id"] == "paper-001"
 
@@ -192,10 +233,17 @@ async def test_admin_cleanup_and_archive(tmp_path, monkeypatch):
 
     pa_main.include_routes()
     app = pa_main.app
-    async with AsyncClient(transport=ASGITransport(app=app), base_url="http://testserver") as ac:
+    async with AsyncClient(
+        transport=ASGITransport(app=app), base_url="http://testserver"
+    ) as ac:
         cleanup_resp = await ac.post(
             "/api/v1/admin/cleanup",
-            json={"upload_retention_days": 7, "report_retention_days": 30, "prune_completed_tasks": False, "dry_run": False},
+            json={
+                "upload_retention_days": 7,
+                "report_retention_days": 30,
+                "prune_completed_tasks": False,
+                "dry_run": False,
+            },
         )
         assert cleanup_resp.status_code == 200
         cleanup = cleanup_resp.json()
@@ -212,12 +260,24 @@ async def test_admin_cleanup_and_archive(tmp_path, monkeypatch):
         fresh_zip = outputs / "task_1.zip"
         with zipfile.ZipFile(fresh_zip, "w") as archive:
             archive.writestr("report_1.json", "{}")
-        await tq.update_task(task_id, status="done", progress=100, result_path=str(fresh_zip), current_stage="completed")
+        await tq.update_task(
+            task_id,
+            status="done",
+            progress=100,
+            result_path=str(fresh_zip),
+            current_stage="completed",
+        )
         async with aiosqlite.connect(str(db_path)) as db:
-            await db.execute("UPDATE tasks SET updated_at = ? WHERE id = ?", ((datetime.now() - timedelta(days=40)).isoformat(sep=" "), task_id))
+            await db.execute(
+                "UPDATE tasks SET updated_at = ? WHERE id = ?",
+                ((datetime.now() - timedelta(days=40)).isoformat(sep=" "), task_id),
+            )
             await db.commit()
 
-        archive_resp = await ac.post("/api/v1/admin/archive", json={"older_than_days": 30, "prune_after_archive": False})
+        archive_resp = await ac.post(
+            "/api/v1/admin/archive",
+            json={"older_than_days": 30, "prune_after_archive": False},
+        )
         assert archive_resp.status_code == 200
         archive = archive_resp.json()
         assert archive["archive_created"] is True

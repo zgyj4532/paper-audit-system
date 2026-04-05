@@ -22,7 +22,9 @@ def _extract_choice_content(payload: Dict[str, Any]) -> str:
     if isinstance(choices, list) and choices:
         first_choice = choices[0]
         if isinstance(first_choice, dict):
-            message = first_choice.get("message") or first_choice.get("delta") or first_choice
+            message = (
+                first_choice.get("message") or first_choice.get("delta") or first_choice
+            )
             if isinstance(message, dict):
                 content = message.get("content")
                 if isinstance(content, str) and content.strip():
@@ -140,18 +142,38 @@ class QwenClient:
         raise RuntimeError(f"Qwen request failed: {last_error}")
 
     async def ping(self) -> Dict[str, Any]:
-        result = await self.chat("请只回复一个 JSON: {\"ok\": true, \"message\": \"pong\"}", max_tokens=32, response_format={"type": "json_object"})
-        return {"ok": True, "message": result["json"].get("message", "pong"), "backend": "qwen", "raw": result["json"]}
+        result = await self.chat(
+            '请只回复一个 JSON: {"ok": true, "message": "pong"}',
+            max_tokens=32,
+            response_format={"type": "json_object"},
+        )
+        return {
+            "ok": True,
+            "message": result["json"].get("message", "pong"),
+            "backend": "qwen",
+            "raw": result["json"],
+        }
 
-    async def review_chunk(self, text: str, *, section_id: Any = None, strictness: int = 3, focus_areas: Iterable[str] | None = None) -> Dict[str, Any]:
-        request = build_review_request(text, section_id=section_id, strictness=strictness, focus_areas=focus_areas)
+    async def review_chunk(
+        self,
+        text: str,
+        *,
+        section_id: Any = None,
+        strictness: int = 3,
+        focus_areas: Iterable[str] | None = None,
+    ) -> Dict[str, Any]:
+        request = build_review_request(
+            text, section_id=section_id, strictness=strictness, focus_areas=focus_areas
+        )
         result = await self.chat(
             messages=request.messages,
             max_tokens=request.max_tokens,
             temperature=request.temperature,
             response_format=request.response_format,
         )
-        issues = result["json"].get("issues", []) if isinstance(result["json"], dict) else []
+        issues = (
+            result["json"].get("issues", []) if isinstance(result["json"], dict) else []
+        )
         if not isinstance(issues, list):
             issues = []
         return {
@@ -162,7 +184,13 @@ class QwenClient:
             "raw": result["json"],
         }
 
-    async def verify_reference(self, reference_text: str, retrieved: Sequence[Dict[str, Any]], *, backend_hint: str = "qwen") -> Dict[str, Any]:
+    async def verify_reference(
+        self,
+        reference_text: str,
+        retrieved: Sequence[Dict[str, Any]],
+        *,
+        backend_hint: str = "qwen",
+    ) -> Dict[str, Any]:
         request = build_reference_request(reference_text, retrieved)
         result = await self.chat(
             messages=request.messages,
@@ -170,9 +198,17 @@ class QwenClient:
             temperature=request.temperature,
             response_format=request.response_format,
         )
-        verdict = result["json"].get("verdict", "unverified") if isinstance(result["json"], dict) else "unverified"
-        reason = result["json"].get("reason") if isinstance(result["json"], dict) else None
-        matched = result["json"].get("matched") if isinstance(result["json"], dict) else None
+        verdict = (
+            result["json"].get("verdict", "unverified")
+            if isinstance(result["json"], dict)
+            else "unverified"
+        )
+        reason = (
+            result["json"].get("reason") if isinstance(result["json"], dict) else None
+        )
+        matched = (
+            result["json"].get("matched") if isinstance(result["json"], dict) else None
+        )
         return {
             "reference": reference_text,
             "retrieved": list(retrieved),

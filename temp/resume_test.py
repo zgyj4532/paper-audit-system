@@ -11,6 +11,7 @@ from subprocess import Popen
 ROOT = Path(r"E:\github\paper-audit-system")
 sys.path.insert(0, str(ROOT))
 
+# ruff: noqa: E402
 from python_service.paper_audit.api.audit import resume_recoverable_tasks
 from python_service.paper_audit.config import settings
 from python_service.paper_audit.core.task_queue import TaskQueue
@@ -79,15 +80,21 @@ async def main() -> None:
     result_path = final_row.get("result_path") if final_row else None
     report_path = ROOT / "outputs" / f"report_{task_id}.json"
 
-    print(json.dumps({
-        "task_id": task_id,
-        "resumed_count": resumed,
-        "final_task": final_row,
-        "result_zip_exists": bool(result_path and Path(result_path).exists()),
-        "report_json_exists": report_path.exists(),
-        "result_zip_path": result_path,
-        "report_json_path": str(report_path),
-    }, ensure_ascii=False, indent=2))
+    print(
+        json.dumps(
+            {
+                "task_id": task_id,
+                "resumed_count": resumed,
+                "final_task": final_row,
+                "result_zip_exists": bool(result_path and Path(result_path).exists()),
+                "report_json_exists": report_path.exists(),
+                "result_zip_path": result_path,
+                "report_json_path": str(report_path),
+            },
+            ensure_ascii=False,
+            indent=2,
+        )
+    )
 
 
 if __name__ == "__main__":

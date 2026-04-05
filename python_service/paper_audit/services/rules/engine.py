@@ -4,7 +4,6 @@ import re
 from dataclasses import dataclass
 from typing import Any, Dict, Iterable, List
 
-
 DEFAULT_FOCUS_AREAS = ("typo", "format", "logic", "reference")
 
 _COLLOQUIAL_PATTERNS = (
@@ -28,16 +27,51 @@ _REFERENCE_PATTERNS = (
 )
 
 _ABSTRACT_LABEL_PATTERNS = (
-    (re.compile(r"^Abstract:[^\s]", re.IGNORECASE), "摘要标题后缺少空格", "改为 Abstract: ", "FORMAT-004"),
-    (re.compile(r"^Keywords:[^\s]", re.IGNORECASE), "关键词标题后缺少空格", "改为 Keywords: ", "FORMAT-006"),
+    (
+        re.compile(r"^Abstract:[^\s]", re.IGNORECASE),
+        "摘要标题后缺少空格",
+        "改为 Abstract: ",
+        "FORMAT-004",
+    ),
+    (
+        re.compile(r"^Keywords:[^\s]", re.IGNORECASE),
+        "关键词标题后缺少空格",
+        "改为 Keywords: ",
+        "FORMAT-006",
+    ),
 )
 
 _REFERENCE_FORMAT_PATTERNS = (
-    (re.compile(r"(?<!\[)[A-Z]\]\."), "参考文献类型标记缺少左括号", "补全为 [D]. / [J]. / [C]." , "REF-002"),
-    (re.compile(r"\[\[[A-Z]\]\."), "参考文献类型标记括号重复", "删除多余的左括号", "REF-003"),
-    (re.compile(r"Keywords:[A-Za-z]"), "Keywords 后缺少空格", "改为 Keywords: ", "FORMAT-003"),
-    (re.compile(r"Abstract:[A-Za-z]"), "Abstract 后缺少空格", "改为 Abstract: ", "FORMAT-004"),
-    (re.compile(r"[A-Za-z]{2,};[A-Za-z]{2,}"), "英文关键词之间缺少空格", "在分号后补空格", "FORMAT-005"),
+    (
+        re.compile(r"(?<!\[)[A-Z]\]\."),
+        "参考文献类型标记缺少左括号",
+        "补全为 [D]. / [J]. / [C].",
+        "REF-002",
+    ),
+    (
+        re.compile(r"\[\[[A-Z]\]\."),
+        "参考文献类型标记括号重复",
+        "删除多余的左括号",
+        "REF-003",
+    ),
+    (
+        re.compile(r"Keywords:[A-Za-z]"),
+        "Keywords 后缺少空格",
+        "改为 Keywords: ",
+        "FORMAT-003",
+    ),
+    (
+        re.compile(r"Abstract:[A-Za-z]"),
+        "Abstract 后缺少空格",
+        "改为 Abstract: ",
+        "FORMAT-004",
+    ),
+    (
+        re.compile(r"[A-Za-z]{2,};[A-Za-z]{2,}"),
+        "英文关键词之间缺少空格",
+        "在分号后补空格",
+        "FORMAT-005",
+    ),
 )
 
 
@@ -69,7 +103,11 @@ class RuleIssue:
 
 
 def _normalize_focus_areas(focus_areas: Iterable[str] | None) -> set[str]:
-    return {str(area).strip() for area in (focus_areas or DEFAULT_FOCUS_AREAS) if str(area).strip()}
+    return {
+        str(area).strip()
+        for area in (focus_areas or DEFAULT_FOCUS_AREAS)
+        if str(area).strip()
+    }
 
 
 def _make_position(text: str, needle: str) -> Dict[str, int]:
@@ -118,7 +156,9 @@ def extract_text_from_parsed_data(parsed_data: Dict[str, Any]) -> str:
     return "\n".join(text_parts)
 
 
-def check_text_rules(text: str, focus_areas: Iterable[str] | None = None) -> List[Dict[str, Any]]:
+def check_text_rules(
+    text: str, focus_areas: Iterable[str] | None = None
+) -> List[Dict[str, Any]]:
     active_areas = _normalize_focus_areas(focus_areas)
     issues: List[Dict[str, Any]] = []
 
@@ -190,7 +230,9 @@ def check_text_rules(text: str, focus_areas: Iterable[str] | None = None) -> Lis
                 )
 
     if "reference" in active_areas:
-        has_reference_like_text = any(pattern.search(text) for pattern in _REFERENCE_PATTERNS)
+        has_reference_like_text = any(
+            pattern.search(text) for pattern in _REFERENCE_PATTERNS
+        )
         for line in _split_lines(text):
             for pattern, message, suggestion, rule_id in _REFERENCE_FORMAT_PATTERNS:
                 if pattern.search(line):
@@ -204,7 +246,11 @@ def check_text_rules(text: str, focus_areas: Iterable[str] | None = None) -> Lis
                         needle=line,
                         rule_id=rule_id,
                     )
-        if has_reference_like_text and "参考文献" in text and not re.search(r"\[[0-9]+\].+\d{4}", text):
+        if (
+            has_reference_like_text
+            and "参考文献" in text
+            and not re.search(r"\[[0-9]+\].+\d{4}", text)
+        ):
             issues.append(
                 RuleIssue(
                     issue_type="reference",
@@ -214,7 +260,9 @@ def check_text_rules(text: str, focus_areas: Iterable[str] | None = None) -> Lis
                     rule_id="REF-001",
                 ).as_dict()
             )
-        if re.search(r"\[[0-9]+\][^\n]*[A-Za-z].*?\d{4}", text) and re.search(r"(?<!\[)[A-Z]\]\.|\[\[[A-Z]\]\.", text):
+        if re.search(r"\[[0-9]+\][^\n]*[A-Za-z].*?\d{4}", text) and re.search(
+            r"(?<!\[)[A-Z]\]\.|\[\[[A-Z]\]\.", text
+        ):
             issues.append(
                 RuleIssue(
                     issue_type="reference",
@@ -239,7 +287,9 @@ def check_consistency_rules(parsed_data: Dict[str, Any]) -> List[Dict[str, Any]]
         abstract_tokens = set(re.findall(r"[\w\u4e00-\u9fff]+", abstract.lower()))
         conclusion_tokens = set(re.findall(r"[\w\u4e00-\u9fff]+", conclusion.lower()))
         if abstract_tokens and conclusion_tokens:
-            overlap = len(abstract_tokens & conclusion_tokens) / max(len(abstract_tokens), len(conclusion_tokens))
+            overlap = len(abstract_tokens & conclusion_tokens) / max(
+                len(abstract_tokens), len(conclusion_tokens)
+            )
             if overlap < 0.15:
                 issues.append(
                     RuleIssue(
@@ -266,7 +316,9 @@ def check_consistency_rules(parsed_data: Dict[str, Any]) -> List[Dict[str, Any]]
 
 
 def detect_reference_entries(parsed_data: Dict[str, Any]) -> List[Dict[str, Any]]:
-    references = parsed_data.get("references", []) if isinstance(parsed_data, dict) else []
+    references = (
+        parsed_data.get("references", []) if isinstance(parsed_data, dict) else []
+    )
     if references:
         return [reference for reference in references if isinstance(reference, dict)]
 
@@ -276,6 +328,8 @@ def detect_reference_entries(parsed_data: Dict[str, Any]) -> List[Dict[str, Any]
         stripped = line.strip()
         if not stripped:
             continue
-        if re.match(r"^\[[0-9]+\]", stripped) or ("et al." in stripped and re.search(r"\d{4}", stripped)):
+        if re.match(r"^\[[0-9]+\]", stripped) or (
+            "et al." in stripped and re.search(r"\d{4}", stripped)
+        ):
             detected.append({"text": stripped})
     return detected

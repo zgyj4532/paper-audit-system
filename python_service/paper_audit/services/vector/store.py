@@ -48,6 +48,7 @@ def get_system_memory_mb() -> int | None:
 
     if sys.platform.startswith("win"):
         try:
+
             class MEMORYSTATUSEX(ctypes.Structure):
                 _fields_ = [
                     ("dwLength", ctypes.c_ulong),
@@ -82,7 +83,9 @@ def can_use_local_reference_verifier() -> bool:
 
 
 def resolve_reference_verifier_backend() -> str:
-    backend = str(getattr(settings, "REFERENCE_VERIFIER_BACKEND", "auto")).strip().lower()
+    backend = (
+        str(getattr(settings, "REFERENCE_VERIFIER_BACKEND", "auto")).strip().lower()
+    )
     if backend in {"local", "qwen"}:
         return backend
     if backend == "auto":
@@ -174,7 +177,9 @@ def _candidate_text(candidate: Dict[str, Any]) -> str:
     return "\n".join(part for part in parts if part)
 
 
-def verify_reference_locally(reference_text: str, retrieved: List[Dict[str, Any]] | None = None) -> Dict[str, Any]:
+def verify_reference_locally(
+    reference_text: str, retrieved: List[Dict[str, Any]] | None = None
+) -> Dict[str, Any]:
     text = str(reference_text or "").strip()
     if not text:
         return {
@@ -187,7 +192,9 @@ def verify_reference_locally(reference_text: str, retrieved: List[Dict[str, Any]
             "llm_backend": "local",
         }
 
-    candidates = list(retrieved) if retrieved is not None else query_papers(text, n_results=3)
+    candidates = (
+        list(retrieved) if retrieved is not None else query_papers(text, n_results=3)
+    )
     if not candidates:
         return {
             "reference": {"text": text},
@@ -209,19 +216,29 @@ def verify_reference_locally(reference_text: str, retrieved: List[Dict[str, Any]
             best_score = score
             best_candidate = candidate
 
-    metadata = best_candidate.get("metadata", {}) if isinstance(best_candidate, dict) else {}
-    candidate_document = best_candidate.get("document", "") if isinstance(best_candidate, dict) else ""
+    metadata = (
+        best_candidate.get("metadata", {}) if isinstance(best_candidate, dict) else {}
+    )
+    candidate_document = (
+        best_candidate.get("document", "") if isinstance(best_candidate, dict) else ""
+    )
     candidate_text = _candidate_text(best_candidate or {})
     reference_years = _extract_years(text)
     candidate_year = str(metadata.get("year", "")).strip()
-    year_mismatch = bool(reference_years and candidate_year and candidate_year not in reference_years)
+    year_mismatch = bool(
+        reference_years and candidate_year and candidate_year not in reference_years
+    )
 
     title_text = str(metadata.get("title", "")).strip()
     title_score = _similarity_score(text, title_text) if title_text else 0.0
     if title_text and _compact_text(title_text) in _compact_text(text):
         title_score = max(title_score, 1.0)
     if title_text:
-        title_score = max(title_score, _prefix_similarity(text, title_text), _prefix_similarity(title_text, text))
+        title_score = max(
+            title_score,
+            _prefix_similarity(text, title_text),
+            _prefix_similarity(title_text, text),
+        )
         for fragment in _extract_reference_fragments(text):
             title_score = max(
                 title_score,
@@ -230,7 +247,11 @@ def verify_reference_locally(reference_text: str, retrieved: List[Dict[str, Any]
                 _prefix_similarity(title_text, fragment),
             )
 
-    author_score = _similarity_score(text, str(metadata.get("authors", ""))) if metadata.get("authors") else 0.0
+    author_score = (
+        _similarity_score(text, str(metadata.get("authors", "")))
+        if metadata.get("authors")
+        else 0.0
+    )
     document_score = _similarity_score(text, candidate_text)
     best_score = max(best_score, title_score, author_score, document_score)
 
@@ -267,7 +288,11 @@ def verify_reference_locally(reference_text: str, retrieved: List[Dict[str, Any]
 
     matched_record = {
         "title": matched_title,
-        "authors": [author.strip() for author in str(metadata.get("authors", "")).split(",") if author.strip()],
+        "authors": [
+            author.strip()
+            for author in str(metadata.get("authors", "")).split(",")
+            if author.strip()
+        ],
         "year": metadata.get("year"),
         "similarity_score": round(best_score, 4),
     }
@@ -322,13 +347,19 @@ class VectorStore:
         metadata = {
             "title": payload.get("title", ""),
             "authors": _join_authors(payload.get("authors")),
-            "year": int(payload.get("year")) if payload.get("year") is not None else None,
+            "year": (
+                int(payload.get("year")) if payload.get("year") is not None else None
+            ),
             "journal": payload.get("journal", ""),
             "doi": payload.get("doi", ""),
             "source": payload.get("source", "user_upload"),
-            "embedding_model": payload.get("embedding_model", "simple-hash-embedding-v1"),
+            "embedding_model": payload.get(
+                "embedding_model", "simple-hash-embedding-v1"
+            ),
         }
-        metadata = {key: value for key, value in metadata.items() if value not in (None, "")}
+        metadata = {
+            key: value for key, value in metadata.items() if value not in (None, "")
+        }
 
         self._collection.upsert(
             ids=[paper_id],
@@ -354,9 +385,15 @@ class VectorStore:
             include=["documents", "metadatas", "distances"],
         )
         ids = results.get("ids", [[]])[0] if isinstance(results, dict) else []
-        documents = results.get("documents", [[]])[0] if isinstance(results, dict) else []
-        metadatas = results.get("metadatas", [[]])[0] if isinstance(results, dict) else []
-        distances = results.get("distances", [[]])[0] if isinstance(results, dict) else []
+        documents = (
+            results.get("documents", [[]])[0] if isinstance(results, dict) else []
+        )
+        metadatas = (
+            results.get("metadatas", [[]])[0] if isinstance(results, dict) else []
+        )
+        distances = (
+            results.get("distances", [[]])[0] if isinstance(results, dict) else []
+        )
 
         rows: List[Dict[str, Any]] = []
         for index, paper_id in enumerate(ids):

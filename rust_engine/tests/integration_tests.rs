@@ -1,7 +1,63 @@
 use axum::body::{to_bytes, Body};
 use axum::http::{Request, StatusCode};
-use tower::util::ServiceExt;
 use serde_json::json;
+use tower::util::ServiceExt;
+
+fn write_entry(writer: &mut zip::ZipWriter<std::fs::File>, name: &str, content: &str) {
+    writer
+        .start_file(name, zip::write::SimpleFileOptions::default())
+        .unwrap();
+    use std::io::Write;
+    writer.write_all(content.as_bytes()).unwrap();
+}
+
+fn build_minimal_docx(path: &std::path::Path) {
+    let file = std::fs::File::create(path).unwrap();
+    let mut writer = zip::ZipWriter::new(file);
+
+    write_entry(
+        &mut writer,
+        "[Content_Types].xml",
+        r#"<?xml version="1.0" encoding="UTF-8" standalone="yes"?>
+<Types xmlns="http://schemas.openxmlformats.org/package/2006/content-types">
+    <Default Extension="rels" ContentType="application/vnd.openxmlformats-package.relationships+xml"/>
+    <Default Extension="xml" ContentType="application/xml"/>
+    <Override PartName="/word/document.xml" ContentType="application/vnd.openxmlformats-officedocument.wordprocessingml.document.main+xml"/>
+</Types>"#,
+    );
+
+    write_entry(
+        &mut writer,
+        "_rels/.rels",
+        r#"<?xml version="1.0" encoding="UTF-8" standalone="yes"?>
+<Relationships xmlns="http://schemas.openxmlformats.org/package/2006/relationships">
+    <Relationship Id="rId1" Type="http://schemas.openxmlformats.org/officeDocument/2006/relationships/officeDocument" Target="word/document.xml"/>
+</Relationships>"#,
+    );
+
+    write_entry(
+        &mut writer,
+        "word/document.xml",
+        r#"<?xml version="1.0" encoding="UTF-8" standalone="yes"?>
+<w:document xmlns:w="http://schemas.openxmlformats.org/wordprocessingml/2006/main">
+    <w:body>
+        <w:p>
+            <w:r><w:t>Hello world</w:t></w:r>
+        </w:p>
+    </w:body>
+</w:document>"#,
+    );
+
+    write_entry(
+        &mut writer,
+        "word/_rels/document.xml.rels",
+        r#"<?xml version="1.0" encoding="UTF-8" standalone="yes"?>
+<Relationships xmlns="http://schemas.openxmlformats.org/package/2006/relationships">
+</Relationships>"#,
+    );
+
+    writer.finish().unwrap();
+}
 
 #[tokio::test]
 async fn test_health_endpoint() {
@@ -20,14 +76,12 @@ async fn test_health_endpoint() {
 
 #[tokio::test]
 async fn test_parse_and_annotate_flow() {
-    use std::fs::{self, File};
-    use std::io::Write;
+    use std::fs;
     use tempfile::tempdir;
 
     let dir = tempdir().unwrap();
-    let file_path = dir.path().join("doc.txt");
-    let mut f = File::create(&file_path).unwrap();
-    writeln!(f, "This is a test document.").unwrap();
+    let file_path = dir.path().join("doc.docx");
+    build_minimal_docx(&file_path);
     let file_path_str = file_path.to_string_lossy().to_string();
 
     let app = paper_audit_rust::create_app();

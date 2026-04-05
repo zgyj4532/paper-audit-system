@@ -34,7 +34,9 @@ async def parse(file_path: str) -> dict:
         return response.json()
 
 
-async def annotate(original_path: str, issues: list, output_filename: str | None = None) -> dict:
+async def annotate(
+    original_path: str, issues: list, output_filename: str | None = None
+) -> dict:
     async with httpx.AsyncClient() as client:
         payload = {
             "original_path": original_path,

@@ -51,6 +51,7 @@ async def health() -> dict:
     memory_usage_mb = None
     if sys.platform.startswith("win"):
         try:
+
             class PROCESS_MEMORY_COUNTERS(ctypes.Structure):
                 _fields_ = [
                     ("cb", wintypes.DWORD),
@@ -68,7 +69,9 @@ async def health() -> dict:
             counters = PROCESS_MEMORY_COUNTERS()
             counters.cb = ctypes.sizeof(PROCESS_MEMORY_COUNTERS)
             handle = ctypes.windll.kernel32.GetCurrentProcess()
-            result = ctypes.windll.psapi.GetProcessMemoryInfo(handle, ctypes.byref(counters), counters.cb)
+            result = ctypes.windll.psapi.GetProcessMemoryInfo(
+                handle, ctypes.byref(counters), counters.cb
+            )
             if result:
                 memory_usage_mb = round(counters.WorkingSetSize / (1024 * 1024), 2)
         except Exception:
@@ -85,7 +88,13 @@ async def health() -> dict:
     return {
         "status": "healthy",
         "version": "0.1.0",
-        "capabilities": ["docx_parse", "annotation", "task_queue", "reporting", "admin_tools"],
+        "capabilities": [
+            "docx_parse",
+            "annotation",
+            "task_queue",
+            "reporting",
+            "admin_tools",
+        ],
         "python_port": int(settings.PYTHON_UVICORN_PORT),
         "rust_port": int(settings.RUST_HTTP_PORT),
         "system": {
@@ -142,11 +151,15 @@ def build_rust(release: bool = True) -> bool:
         return False
 
 
-def start_rust_process(skip_build: bool = False, release: bool = True) -> Optional[subprocess.Popen]:
+def start_rust_process(
+    skip_build: bool = False, release: bool = True
+) -> Optional[subprocess.Popen]:
     exe = find_rust_executable()
     if exe is None:
         if skip_build:
-            log.info("Rust executable not found and skip_build=True; not starting Rust service.")
+            log.info(
+                "Rust executable not found and skip_build=True; not starting Rust service."
+            )
             return None
         if not build_rust(release=release):
             return None
@@ -181,17 +194,32 @@ def run() -> None:
     include_routes()
 
     parser = argparse.ArgumentParser()
-    parser.add_argument("--skip-rust-build", action="store_true", help="Do not attempt to build Rust if binary missing")
-    parser.add_argument("--no-rust", action="store_true", help="Do not start Rust engine at all")
-    parser.add_argument("--rust-release", action="store_true", default=True, help="Build Rust in release mode")
+    parser.add_argument(
+        "--skip-rust-build",
+        action="store_true",
+        help="Do not attempt to build Rust if binary missing",
+    )
+    parser.add_argument(
+        "--no-rust", action="store_true", help="Do not start Rust engine at all"
+    )
+    parser.add_argument(
+        "--rust-release",
+        action="store_true",
+        default=True,
+        help="Build Rust in release mode",
+    )
     args, _ = parser.parse_known_args()
 
     rust_proc: Optional[subprocess.Popen] = None
     if not args.no_rust:
         if shutil.which("cargo") or find_rust_executable():
-            rust_proc = start_rust_process(skip_build=args.skip_rust_build, release=args.rust_release)
+            rust_proc = start_rust_process(
+                skip_build=args.skip_rust_build, release=args.rust_release
+            )
         else:
-            log.info("No cargo in PATH and no Rust binary found; skipping Rust engine start.")
+            log.info(
+                "No cargo in PATH and no Rust binary found; skipping Rust engine start."
+            )
 
     def _on_signal(signum, frame):
         log.info("Received signal %s, shutting down.", signum)
