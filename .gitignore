@@ -21,6 +21,6 @@ dist/
 wheels/
 *.egg-info
 *.docx
-
+logs/
 # Virtual environments
 .venv
