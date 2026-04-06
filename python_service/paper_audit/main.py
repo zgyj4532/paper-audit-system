@@ -179,7 +179,7 @@ def start_rust_process(
 
     log.info("Starting Rust engine: %s", exe)
     try:
-        return subprocess.Popen([str(exe)], cwd=str(exe.parent), env=env)
+        return subprocess.Popen([f"./{exe.name}"], cwd=str(exe.parent), env=env)
     except FileNotFoundError:
         log.exception("Rust executable not found when attempting to start")
         return None

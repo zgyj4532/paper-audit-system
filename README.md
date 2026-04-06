@@ -317,6 +317,16 @@ DEFAULT_STRICTNESS=3
 - 任务完成后，报告 JSON、PDF 和 ZIP 会输出到 `outputs/`。
 - 临时 Rust 解析 JSON 会在任务结束后清理。
 
+### Linux 中文字体说明
+
+在 Linux 服务器上生成 PDF 批注报告时，如果系统没有宋体/黑体，可能会导致 PDF 渲染失败或下载接口返回 404。当前项目已经按下面方式处理：
+
+- 安装字体包：`fonts-wqy-zenhei`、`fonts-wqy-microhei`、`fonts-noto-cjk`
+- 字体查找路径：优先使用 `/usr/share/fonts/truetype/wqy/wqy-zenhei.ttc`、`/usr/share/fonts/truetype/wqy/wqy-microhei.ttc`、`/usr/share/fonts/opentype/noto/NotoSerifCJK-Regular.ttc`
+- 代码回退策略：`python_service/paper_audit/api/audit.py` 会先查找 Linux 中文字体，找不到时再回退到 Windows 字体路径，最后再使用 PyMuPDF 内置字体
+
+如果你在其他 Linux 发行版上部署，只要保证系统里有可用的中文字体文件，并让 `_resolve_cjk_font_file()` 能搜到对应路径即可。
+
 ## 项目结构
 
 ```text

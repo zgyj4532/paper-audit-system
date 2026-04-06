@@ -30,11 +30,11 @@ jobs:
         with:
           toolchain: stable
           profile: minimal
+          components: rustfmt
           override: true
       - name: Check rustfmt
         run: |
           cd rust_engine
-          rustup component add rustfmt || true
           cargo fmt -- --check
       - name: Run cargo test
         run: |

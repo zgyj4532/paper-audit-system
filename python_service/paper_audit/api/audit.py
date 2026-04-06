@@ -73,12 +73,20 @@ def _resolve_cjk_font_file(font_name: str | None = None) -> str | None:
     font_candidates: list[Path]
     if font_name and "黑体" in font_name:
         font_candidates = [
+            Path("/usr/share/fonts/truetype/wqy/wqy-zenhei.ttc"),
+            Path("/usr/share/fonts/truetype/wqy/wqy-zenhei.ttf"),
+            Path("/usr/share/fonts/opentype/noto/NotoSansCJK-Regular.ttc"),
+            Path("/usr/share/fonts/opentype/noto/NotoSansCJK-Regular.otf"),
             Path(r"C:\Windows\Fonts\simhei.ttf"),
             Path(r"C:\Windows\Fonts\simsun.ttc"),
             Path(r"C:\Windows\Fonts\simsun.ttf"),
         ]
     else:
         font_candidates = [
+            Path("/usr/share/fonts/truetype/wqy/wqy-microhei.ttc"),
+            Path("/usr/share/fonts/truetype/wqy/wqy-microhei.ttf"),
+            Path("/usr/share/fonts/opentype/noto/NotoSerifCJK-Regular.ttc"),
+            Path("/usr/share/fonts/opentype/noto/NotoSerifCJK-Regular.otf"),
             Path(r"C:\Windows\Fonts\simsun.ttc"),
             Path(r"C:\Windows\Fonts\simsun.ttf"),
             Path(r"C:\Windows\Fonts\simhei.ttf"),
@@ -307,12 +315,14 @@ def _render_pdf_annotation_report(
         font_name: str,
         color: tuple[float, float, float],
     ) -> None:
+        effective_font_name = font_name if font_file else "helv"
+        effective_fontfile = font_file if font_file else None
         page.insert_textbox(
             box,
             text,
             fontsize=font_size,
-            fontname=font_name,
-            fontfile=font_file,
+            fontname=effective_font_name,
+            fontfile=effective_fontfile,
             color=color,
             overlay=True,
             align=fitz.TEXT_ALIGN_LEFT,

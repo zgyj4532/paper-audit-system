@@ -1,0 +1,57 @@
+{
+  "data": {
+    "metadata": {
+      "has_math": false,
+      "total_pages": 1,
+      "total_paragraphs": 1,
+      "total_tables": 0,
+      "total_words": 2
+    },
+    "sections": [
+      {
+        "element_type": "Paragraph",
+        "id": 1,
+        "level": 0,
+        "raw_text": "Hello world",
+        "runs": [
+          {
+            "color": "000000",
+            "font": "unknown",
+            "size": "unknown",
+            "style": "Normal",
+            "text": "Hello world"
+          }
+        ],
+        "xml_path": "/w:body/w:p[1]"
+      }
+    ]
+  },
+  "metadata": {
+    "has_math": false,
+    "total_pages": 1,
+    "total_paragraphs": 1,
+    "total_tables": 0,
+    "total_words": 2
+  },
+  "sections": [
+    {
+      "element_type": "Paragraph",
+      "id": 1,
+      "level": 0,
+      "raw_text": "Hello world",
+      "runs": [
+        {
+          "color": "000000",
+          "font": "unknown",
+          "size": "unknown",
+          "style": "Normal",
+          "text": "Hello world"
+        }
+      ],
+      "xml_path": "/w:body/w:p[1]"
+    }
+  ],
+  "styles": null,
+  "success": true,
+  "temp_output_path": "./temp/rust_engine/rust_parse/doc_parsed.json"
+}
