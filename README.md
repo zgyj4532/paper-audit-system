@@ -38,7 +38,7 @@ uv run main.py
 启动后默认监听：
 
 - Python：`http://127.0.0.1:8000`
-- Rust：`http://127.0.0.1:8081` 或环境变量指定的端口
+- Rust：`http://127.0.0.1:8193` 或环境变量指定的端口
 
 ### curl 示例
 
@@ -292,7 +292,7 @@ QWEN_API_KEY=sk-your-dashscope-api-key-here
 QWEN_BASE_URL=https://dashscope.aliyuncs.com/api/v1
 QWEN_MODEL=qwen-max-latest
 
-RUST_HTTP_PORT=8080
+RUST_HTTP_PORT=8193
 RUST_LOG=info
 RUST_TEMP_DIR=./temp/rust_engine
 

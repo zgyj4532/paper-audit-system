@@ -23,7 +23,7 @@ class Settings(BaseSettings):
     ENABLE_UUID_AUTH: int = 0
 
     # 应用级配置
-    RUST_HTTP_PORT: int = 8081
+    RUST_HTTP_PORT: int = 8193
     PYTHON_UVICORN_PORT: int = 8000
     DRAFT_EXPIRE_DAYS: int = 7
     MAX_FILE_SIZE_MB: int = 10
