@@ -9,7 +9,9 @@ from python_service.paper_audit.services.workflow import langgraph
 
 
 class FakeClient:
-    async def review_chunk(self, text, *, section_id=None, strictness=3, focus_areas=None):
+    async def review_chunk(
+        self, text, *, section_id=None, strictness=3, focus_areas=None
+    ):
         return {
             "issues": [
                 {

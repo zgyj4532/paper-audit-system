@@ -114,9 +114,7 @@ def _find_best_original_span(
     return min(matches, key=lambda span: abs(span[0] - model_start))
 
 
-def _normalize_issue_position(
-    issue: Dict[str, Any], text: str
-) -> Dict[str, Any]:
+def _normalize_issue_position(issue: Dict[str, Any], text: str) -> Dict[str, Any]:
     if not isinstance(issue, dict):
         return issue
 
@@ -143,7 +141,10 @@ def _normalize_issue_position(
         else:
             current_width = max(0, model_end - model_start)
             original_width = len(original)
-            if current_width < original_width or text[model_start:model_end] != original:
+            if (
+                current_width < original_width
+                or text[model_start:model_end] != original
+            ):
                 normalized["position"] = {
                     "start_char": start_char,
                     "end_char": end_char,
