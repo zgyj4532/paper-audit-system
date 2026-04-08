@@ -71,7 +71,8 @@ REVIEW_CHUNK_PROMPT_TEMPLATE = """[ROLE]
 4. 禁止输出 schema 外的字段
 5. 禁止解释“为什么这样审查”
 6. 禁止 apologizing 或免责声明
-7. 下方 [EXAMPLES] 仅用于说明输出格式，禁止在最终回答中复述、引用或改写任何示例原文、示例句子或示例 JSON 值
+7. 若输出 position 且包含 original，请让 position 覆盖 original 在输入文本中的完整范围，不要只标注原文中的局部片段
+8. 下方 [EXAMPLES] 仅用于说明输出格式，禁止在最终回答中复述、引用或改写任何示例原文、示例句子或示例 JSON 值
 
 [EXAMPLES]
 输入："本文研究了卷积神经网络（CNN）在图像分类种的应用。"

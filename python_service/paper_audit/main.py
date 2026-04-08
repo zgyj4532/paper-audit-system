@@ -25,6 +25,7 @@ log = logging.getLogger("paper_audit.main")
 _APP_START_TIME = time.time()
 
 _routes_loaded = False
+_PROJECT_ROOT = Path(__file__).resolve().parents[2]
 
 
 @asynccontextmanager
@@ -128,7 +129,7 @@ def include_routes() -> None:
 
 
 def _possible_rust_bins() -> list[Path]:
-    base = Path("rust_engine")
+    base = _PROJECT_ROOT / "rust_engine"
     return [
         base / "target" / "release" / "paper-audit-rust.exe",
         base / "target" / "release" / "paper-audit-rust",
@@ -150,7 +151,7 @@ def build_rust(release: bool = True) -> bool:
         cmd.append("--release")
     log.info("Building Rust engine: %s", shlex.join(cmd))
     try:
-        subprocess.run(cmd, cwd="rust_engine", check=True)
+        subprocess.run(cmd, cwd=str(_PROJECT_ROOT / "rust_engine"), check=True)
         return True
     except subprocess.CalledProcessError:
         log.exception("Failed to build Rust engine")
@@ -179,7 +180,7 @@ def start_rust_process(
 
     log.info("Starting Rust engine: %s", exe)
     try:
-        return subprocess.Popen([f"./{exe.name}"], cwd=str(exe.parent), env=env)
+        return subprocess.Popen([str(exe.resolve())], env=env)
     except FileNotFoundError:
         log.exception("Rust executable not found when attempting to start")
         return None

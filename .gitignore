@@ -10,6 +10,7 @@ env/
 /target/
 /rust_engine/target/
 /rust_engine/temp
+/temp/rust_engine/
 uploads/
 outputs/
 data/

@@ -90,6 +90,74 @@ def _dedupe_issues(issues: List[Dict[str, Any]]) -> List[Dict[str, Any]]:
     return deduped
 
 
+def _find_best_original_span(
+    text: str, original: str, model_start: int | None = None
+) -> tuple[int, int] | None:
+    if not text or not original:
+        return None
+
+    matches: List[tuple[int, int]] = []
+    cursor = 0
+    while True:
+        index = text.find(original, cursor)
+        if index < 0:
+            break
+        matches.append((index, index + len(original)))
+        cursor = index + 1
+
+    if not matches:
+        return None
+
+    if model_start is None:
+        return matches[0]
+
+    return min(matches, key=lambda span: abs(span[0] - model_start))
+
+
+def _normalize_issue_position(
+    issue: Dict[str, Any], text: str
+) -> Dict[str, Any]:
+    if not isinstance(issue, dict):
+        return issue
+
+    normalized = dict(issue)
+    original = str(normalized.get("original") or "")
+    position = normalized.get("position")
+    model_start: int | None = None
+    model_end: int | None = None
+    if isinstance(position, dict):
+        start = position.get("start_char")
+        end = position.get("end_char")
+        if isinstance(start, int) and isinstance(end, int):
+            model_start = start
+            model_end = end
+
+    best_span = _find_best_original_span(text, original, model_start)
+    if best_span is not None:
+        start_char, end_char = best_span
+        if model_start is None or model_end is None:
+            normalized["position"] = {
+                "start_char": start_char,
+                "end_char": end_char,
+            }
+        else:
+            current_width = max(0, model_end - model_start)
+            original_width = len(original)
+            if current_width < original_width or text[model_start:model_end] != original:
+                normalized["position"] = {
+                    "start_char": start_char,
+                    "end_char": end_char,
+                }
+
+    return normalized
+
+
+def _normalize_issue_positions(
+    issues: List[Dict[str, Any]], text: str
+) -> List[Dict[str, Any]]:
+    return [_normalize_issue_position(issue, text) for issue in issues]
+
+
 def _batch_items(items: List[Any], batch_size: int) -> List[List[Any]]:
     size = max(1, batch_size)
     return [items[index : index + size] for index in range(0, len(items), size)]
@@ -232,16 +300,23 @@ async def review_document(parsed_data: Dict[str, Any]) -> Dict[str, Any]:
         for chunk, local_issues, llm_issues in zip(
             batch, local_issue_sets, llm_issue_sets
         ):
+            normalized_local_issues = _normalize_issue_positions(
+                [issue for issue in local_issues if isinstance(issue, dict)],
+                chunk["text"],
+            )
+            normalized_llm_issues = _normalize_issue_positions(
+                [issue for issue in llm_issues if isinstance(issue, dict)],
+                chunk["text"],
+            )
             merged_issues = _dedupe_issues(
-                local_issues
-                + [issue for issue in llm_issues if isinstance(issue, dict)]
+                normalized_local_issues + normalized_llm_issues
             )
             chunk_reviews.append(
                 {
                     "section_id": chunk.get("section_id"),
                     "text": chunk.get("text"),
-                    "local_issues": local_issues,
-                    "llm_issues": llm_issues,
+                    "local_issues": normalized_local_issues,
+                    "llm_issues": normalized_llm_issues,
                     "issues": merged_issues,
                     "issue_count": len(merged_issues),
                 }
