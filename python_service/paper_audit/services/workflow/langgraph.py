@@ -6,7 +6,12 @@ from typing import Any, Dict, List, TypedDict
 
 from ...config import settings
 from ..llm import build_qwen_client, normalize_focus_areas
-from ..rules import check_consistency_rules, check_text_rules, detect_reference_entries
+from ..rules import (
+    check_consistency_rules,
+    check_table_rules,
+    check_text_rules,
+    detect_reference_entries,
+)
 from ..vector import (
     can_use_local_reference_verifier,
     query_papers,
@@ -30,19 +35,75 @@ def split_into_chunks(
 ) -> List[Dict[str, Any]]:
     sections = parsed_data.get("sections", []) if isinstance(parsed_data, dict) else []
     chunks: List[Dict[str, Any]] = []
-    for section in sections:
-        if not isinstance(section, dict):
-            continue
-        text = str(section.get("raw_text") or section.get("text") or "")
-        if not text:
-            continue
+    table_index = 0
+
+    def _normalize_cells(row: Any) -> List[str]:
+        if not isinstance(row, list):
+            return [] if row is None else [str(row)]
+        return ["" if cell is None else str(cell) for cell in row]
+
+    def _append_text_chunks(
+        *,
+        text: str,
+        section_id: Any,
+        is_table: bool,
+        kind: str,
+        extra: Dict[str, Any] | None = None,
+    ) -> None:
         start = 0
         while start < len(text):
             end = min(start + chunk_size, len(text))
-            chunks.append({"section_id": section.get("id"), "text": text[start:end]})
+            chunk = {
+                "kind": kind,
+                "section_id": section_id,
+                "text": text[start:end],
+                "is_table": is_table,
+            }
+            if extra:
+                chunk.update(extra)
+            chunks.append(chunk)
             if end == len(text):
                 break
             start = end - overlap if end - overlap > start else end
+
+    for section in sections:
+        if not isinstance(section, dict):
+            continue
+        is_table = bool(section.get("is_table"))
+        section_id = section.get("id")
+
+        if is_table:
+            table_index += 1
+            table_rows = section.get("table_rows")
+            if isinstance(table_rows, list) and table_rows:
+                for row_index, row in enumerate(table_rows, start=1):
+                    cells = _normalize_cells(row)
+                    if not cells:
+                        continue
+                    _append_text_chunks(
+                        text="\t".join(cells),
+                        section_id=section_id,
+                        is_table=True,
+                        kind="row",
+                        extra={
+                            "table_index": table_index,
+                            "row_index": row_index,
+                            "cell_count": len(cells),
+                            "cells": cells,
+                        },
+                    )
+                continue
+
+        text = str(section.get("raw_text") or section.get("text") or "")
+        if not text:
+            continue
+        _append_text_chunks(
+            text=text,
+            section_id=section_id,
+            is_table=is_table,
+            kind="table" if is_table else "text",
+            extra={"table_index": table_index} if is_table else None,
+        )
     return chunks
 
 
@@ -60,12 +121,24 @@ def _issue_span(issue: Dict[str, Any]) -> tuple[int | None, int | None]:
     return None, None
 
 
+def _issue_label(issue: Dict[str, Any]) -> str:
+    if not isinstance(issue, dict):
+        return ""
+    original = issue.get("original")
+    if isinstance(original, str) and original.strip():
+        return original.strip()
+    field_name = issue.get("field_name")
+    if isinstance(field_name, str) and field_name.strip():
+        return field_name.strip()
+    return ""
+
+
 def _is_same_issue(
     left: Dict[str, Any], right: Dict[str, Any], tolerance: int = 3
 ) -> bool:
     if left.get("issue_type") != right.get("issue_type"):
         return False
-    if str(left.get("original", "")).strip() != str(right.get("original", "")).strip():
+    if _issue_label(left) != _issue_label(right):
         return False
 
     left_start, left_end = _issue_span(left)
@@ -88,6 +161,30 @@ def _dedupe_issues(issues: List[Dict[str, Any]]) -> List[Dict[str, Any]]:
             continue
         deduped.append(issue)
     return deduped
+
+
+def _group_table_chunks(chunks: List[Dict[str, Any]]) -> List[Dict[str, Any]]:
+    groups: List[Dict[str, Any]] = []
+    index_by_key: Dict[tuple[Any, Any], int] = {}
+
+    for chunk in chunks:
+        if not bool(chunk.get("is_table")):
+            continue
+        key = (chunk.get("section_id"), chunk.get("table_index"))
+        group_index = index_by_key.get(key)
+        if group_index is None:
+            group_index = len(groups)
+            index_by_key[key] = group_index
+            groups.append(
+                {
+                    "section_id": chunk.get("section_id"),
+                    "table_index": chunk.get("table_index"),
+                    "rows": [],
+                }
+            )
+        groups[group_index]["rows"].append(chunk)
+
+    return groups
 
 
 def _find_best_original_span(
@@ -187,6 +284,73 @@ async def _review_chunk_with_qwen(
         ]
 
 
+async def _review_table_with_qwen(
+    client: Any, table_rows: List[Dict[str, Any]], focus_areas: List[str]
+) -> Dict[str, Any]:
+    try:
+        qwen_result = await client.review_table(
+            table_rows,
+            section_id=table_rows[0].get("section_id") if table_rows else None,
+            strictness=3,
+            doc_type="学位论文",
+            degree_level="学士",
+            institution="中国计量大学",
+        )
+        table_issues = (
+            qwen_result.get("table_issues", []) if isinstance(qwen_result, dict) else []
+        )
+        return {
+            "table_issues": [
+                issue for issue in table_issues if isinstance(issue, dict)
+            ],
+            "field_summary": (
+                qwen_result.get("field_summary", {})
+                if isinstance(qwen_result, dict)
+                else {}
+            ),
+            "critical_gaps": (
+                qwen_result.get("critical_gaps", [])
+                if isinstance(qwen_result, dict)
+                else []
+            ),
+            "backend": (
+                qwen_result.get("backend", "qwen")
+                if isinstance(qwen_result, dict)
+                else "qwen"
+            ),
+            "raw": qwen_result.get("raw", {}) if isinstance(qwen_result, dict) else {},
+        }
+    except Exception as exc:
+        return {
+            "table_issues": [
+                {
+                    "issue_type": "review_error",
+                    "severity": 1,
+                    "field_name": "table",
+                    "field_value": "",
+                    "position": {
+                        "section_id": (
+                            table_rows[0].get("section_id") if table_rows else None
+                        ),
+                        "table_index": (
+                            table_rows[0].get("table_index") if table_rows else None
+                        ),
+                        "row": table_rows[0].get("row_index") if table_rows else None,
+                        "col": 1,
+                    },
+                    "message": str(exc),
+                    "suggestion": "retry later",
+                    "rule_id": "TABLE-REVIEW-ERROR",
+                    "auto_fixable": False,
+                }
+            ],
+            "field_summary": {},
+            "critical_gaps": [],
+            "backend": "qwen",
+            "raw": {},
+        }
+
+
 async def _verify_reference_with_qwen(
     client: Any, reference: Dict[str, Any]
 ) -> Dict[str, Any]:
@@ -283,24 +447,107 @@ async def review_document(parsed_data: Dict[str, Any]) -> Dict[str, Any]:
 
     client = build_qwen_client() if not fast_local_only else None
     batch_size = max(1, int(getattr(settings, "LLM_QWEN_BATCH_SIZE", 4)))
+    table_groups = _group_table_chunks(chunks)
+
+    table_review_map: Dict[tuple[Any, Any], Dict[str, Any]] = {}
+    for batch in _batch_items(table_groups, batch_size):
+        for group in batch:
+            table_rows = group.get("rows", [])
+            local_table_issues = check_table_rules(table_rows, focus_areas)
+            if fast_local_only or client is None:
+                llm_table_issues: List[Dict[str, Any]] = []
+                table_backend = "local"
+                field_summary: Dict[str, Any] = {}
+                critical_gaps: List[str] = []
+            else:
+                table_result = await _review_table_with_qwen(
+                    client, table_rows, focus_areas
+                )
+                llm_table_issues = table_result.get("table_issues", [])
+                table_backend = table_result.get("backend", "qwen")
+                field_summary = table_result.get("field_summary", {})
+                critical_gaps = table_result.get("critical_gaps", [])
+
+            merged_table_issues = _dedupe_issues(local_table_issues + llm_table_issues)
+            row_reviews: List[Dict[str, Any]] = []
+            for row in table_rows:
+                row_index = row.get("row_index")
+                row_issues = [
+                    issue
+                    for issue in merged_table_issues
+                    if issue.get("position", {}).get("row") == row_index
+                ]
+                row_reviews.append(
+                    {
+                        "section_id": row.get("section_id"),
+                        "kind": "row",
+                        "table_index": row.get("table_index"),
+                        "row_index": row.get("row_index"),
+                        "cell_count": row.get("cell_count"),
+                        "cells": row.get("cells", []),
+                        "text": row.get("text"),
+                        "is_table": True,
+                        "issues": row_issues,
+                        "issue_count": len(row_issues),
+                    }
+                )
+
+            table_key = (group.get("section_id"), group.get("table_index"))
+            table_review_map[table_key] = {
+                "section_id": group.get("section_id"),
+                "kind": "table",
+                "table_index": group.get("table_index"),
+                "is_table": True,
+                "rows": table_rows,
+                "row_reviews": row_reviews,
+                "local_issues": local_table_issues,
+                "llm_issues": llm_table_issues,
+                "table_issues": merged_table_issues,
+                "issues": merged_table_issues,
+                "issue_count": len(merged_table_issues),
+                "field_summary": field_summary,
+                "critical_gaps": critical_gaps,
+                "backend": table_backend,
+            }
 
     for batch in _batch_items(chunks, batch_size):
-        local_issue_sets = [
-            check_text_rules(chunk["text"], focus_areas) for chunk in batch
+        reviewable_chunks = [
+            chunk for chunk in batch if not bool(chunk.get("is_table"))
         ]
-        if fast_local_only or client is None:
-            llm_issue_sets = [[] for _ in batch]
+        if reviewable_chunks:
+            local_issue_sets = [
+                check_text_rules(chunk["text"], focus_areas)
+                for chunk in reviewable_chunks
+            ]
+            if fast_local_only or client is None:
+                llm_issue_sets = [[] for _ in reviewable_chunks]
+            else:
+                llm_issue_sets = await asyncio.gather(
+                    *[
+                        _review_chunk_with_qwen(client, chunk, focus_areas)
+                        for chunk in reviewable_chunks
+                    ]
+                )
         else:
-            llm_issue_sets = await asyncio.gather(
-                *[
-                    _review_chunk_with_qwen(client, chunk, focus_areas)
-                    for chunk in batch
-                ]
-            )
+            local_issue_sets = []
+            llm_issue_sets = []
 
-        for chunk, local_issues, llm_issues in zip(
-            batch, local_issue_sets, llm_issue_sets
-        ):
+        reviewable_index = 0
+        for chunk in batch:
+            if bool(chunk.get("is_table")):
+                table_key = (chunk.get("section_id"), chunk.get("table_index"))
+                if table_key in table_review_map and not any(
+                    item.get("section_id") == chunk.get("section_id")
+                    and item.get("table_index") == chunk.get("table_index")
+                    for item in chunk_reviews
+                ):
+                    chunk_reviews.append(table_review_map[table_key])
+                continue
+
+            local_issues = local_issue_sets[reviewable_index]
+            llm_issues = llm_issue_sets[reviewable_index]
+            reviewable_index += 1
+
             normalized_local_issues = _normalize_issue_positions(
                 [issue for issue in local_issues if isinstance(issue, dict)],
                 chunk["text"],
@@ -315,7 +562,9 @@ async def review_document(parsed_data: Dict[str, Any]) -> Dict[str, Any]:
             chunk_reviews.append(
                 {
                     "section_id": chunk.get("section_id"),
+                    "kind": chunk.get("kind", "text"),
                     "text": chunk.get("text"),
+                    "is_table": bool(chunk.get("is_table")),
                     "local_issues": normalized_local_issues,
                     "llm_issues": normalized_llm_issues,
                     "issues": merged_issues,

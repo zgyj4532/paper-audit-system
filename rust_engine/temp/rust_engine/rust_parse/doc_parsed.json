@@ -11,6 +11,7 @@
       {
         "element_type": "Paragraph",
         "id": 1,
+        "is_table": false,
         "level": 0,
         "raw_text": "Hello world",
         "runs": [
@@ -37,6 +38,7 @@
     {
       "element_type": "Paragraph",
       "id": 1,
+      "is_table": false,
       "level": 0,
       "raw_text": "Hello world",
       "runs": [
@@ -53,5 +55,5 @@
   ],
   "styles": null,
   "success": true,
-  "temp_output_path": "./temp/rust_engine/rust_parse/doc_parsed.json"
+  "temp_output_path": "./temp/rust_engine\\rust_parse\\doc_parsed.json"
 }

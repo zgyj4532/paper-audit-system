@@ -7,7 +7,9 @@ from typing import Any, Dict, Iterable, List, Sequence
 import httpx
 
 from ...config import settings
-from .prompt import build_reference_request, build_review_request
+from .audit_prompt import build_review_request
+from .table_prompt import build_table_validation_request
+from .verify_prompt import build_reference_request
 
 
 def normalize_dashscope_base_url(base_url: str) -> str:
@@ -180,6 +182,56 @@ class QwenClient:
             "section_id": section_id,
             "text": text,
             "issues": issues,
+            "backend": "qwen",
+            "raw": result["json"],
+        }
+
+    async def review_table(
+        self,
+        table_rows: Sequence[Dict[str, Any]],
+        *,
+        section_id: Any = None,
+        doc_type: str = "学位论文",
+        degree_level: str = "学士",
+        institution: str = "中国计量大学",
+        strictness: int = 3,
+    ) -> Dict[str, Any]:
+        request = build_table_validation_request(
+            table_rows,
+            section_id=section_id,
+            doc_type=doc_type,
+            degree_level=degree_level,
+            institution=institution,
+            strictness=strictness,
+        )
+        result = await self.chat(
+            messages=request.messages,
+            max_tokens=request.max_tokens,
+            temperature=request.temperature,
+            response_format=request.response_format,
+        )
+        payload = result["json"] if isinstance(result["json"], dict) else {}
+        table_issues = (
+            payload.get("table_issues", []) if isinstance(payload, dict) else []
+        )
+        field_summary = (
+            payload.get("field_summary", {}) if isinstance(payload, dict) else {}
+        )
+        critical_gaps = (
+            payload.get("critical_gaps", []) if isinstance(payload, dict) else []
+        )
+        if not isinstance(table_issues, list):
+            table_issues = []
+        if not isinstance(field_summary, dict):
+            field_summary = {}
+        if not isinstance(critical_gaps, list):
+            critical_gaps = []
+        return {
+            "section_id": section_id,
+            "table_rows": list(table_rows),
+            "table_issues": table_issues,
+            "field_summary": field_summary,
+            "critical_gaps": critical_gaps,
             "backend": "qwen",
             "raw": result["json"],
         }
