@@ -4,6 +4,7 @@ import re
 from typing import Any, Dict, Iterable, List
 
 from .common import RuleIssue, get_section_format, get_section_text, get_sections
+from .common import is_code_like_section
 
 try:
     from docx import Document as DocxDocument
@@ -214,6 +215,8 @@ def _parsed_sections_rules(
     previous_text = ""
 
     for index, section in enumerate(sections, start=1):
+        if is_code_like_section(section):
+            continue
         text = get_section_text(section)
         format_info = get_section_format(section)
         heading_level = _heading_level_for_section(section)
@@ -756,6 +759,8 @@ def check_document_rules(
     _parsed_sections_rules(sections, issues)
 
     for index, section in enumerate(sections, start=1):
+        if is_code_like_section(section):
+            continue
         if bool(section.get("has_math")):
             alignment = str(get_section_format(section).get("alignment") or "").lower()
             if alignment != "right":

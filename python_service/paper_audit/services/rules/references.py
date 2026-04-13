@@ -3,7 +3,7 @@ from __future__ import annotations
 import re
 from typing import Any, Dict, List
 
-from .common import extract_text_from_parsed_data
+from .common import extract_text_from_parsed_data, is_code_like_section
 
 _REFERENCE_TYPE_PATTERN = re.compile(r"\[(?P<kind>[JM])\]")
 _REFERENCE_INDEX_PATTERN = re.compile(r"^\[(?P<index>\d+)\]")
@@ -81,7 +81,11 @@ def _extract_two_digit_years(reference_text: str) -> List[int]:
 def _reference_texts(parsed_data: Dict[str, Any]) -> List[str]:
     entries = detect_reference_entries(parsed_data)
     if entries:
-        return [_entry_text(entry) for entry in entries if _entry_text(entry)]
+        return [
+            _entry_text(entry)
+            for entry in entries
+            if _entry_text(entry) and not is_code_like_section(entry)
+        ]
 
     text = extract_text_from_parsed_data(parsed_data)
     return [line.strip() for line in text.splitlines() if line.strip()]

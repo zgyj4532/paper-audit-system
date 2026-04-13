@@ -12,6 +12,7 @@ from ..rules import (
     check_text_rules,
     detect_reference_entries,
 )
+from ..rules.common import is_code_like_text
 from ..vector import (
     can_use_local_reference_verifier,
     query_papers,
@@ -98,12 +99,18 @@ def split_into_chunks(
         text = str(section.get("raw_text") or section.get("text") or "")
         if not text:
             continue
+        code_like = is_code_like_text(text)
+        extra: Dict[str, Any] | None = None
+        if is_table:
+            extra = {"table_index": table_index}
+        if code_like and not is_table:
+            extra = {"is_code_block": True}
         _append_text_chunks(
             text=text,
             section_id=section_id,
             is_table=is_table,
             kind="table" if is_table else "text",
-            extra={"table_index": table_index} if is_table else None,
+            extra=extra,
         )
     return chunks
 
@@ -194,6 +201,21 @@ def _dedupe_issues(issues: List[Dict[str, Any]]) -> List[Dict[str, Any]]:
         seen.add(signature)
         deduped.append(issue)
     return deduped
+
+
+def _skipped_chunk_review(chunk: Dict[str, Any], reason: str) -> Dict[str, Any]:
+    return {
+        "section_id": chunk.get("section_id"),
+        "kind": chunk.get("kind", "text"),
+        "text": chunk.get("text"),
+        "is_table": bool(chunk.get("is_table")),
+        "is_code_block": True,
+        "review_skipped": reason,
+        "local_issues": [],
+        "llm_issues": [],
+        "issues": [],
+        "issue_count": 0,
+    }
 
 
 def _group_table_chunks(chunks: List[Dict[str, Any]]) -> List[Dict[str, Any]]:
@@ -479,8 +501,14 @@ async def review_document(
     chunks = split_into_chunks(parsed_data)
     chunk_reviews: List[Dict[str, Any]] = []
     fast_local_only = _fast_local_only()
+    client: Any = None
 
-    client = build_qwen_client() if not fast_local_only else None
+    def ensure_client() -> Any:
+        nonlocal client
+        if client is None:
+            client = build_qwen_client()
+        return client
+
     batch_size = max(1, int(getattr(settings, "LLM_QWEN_BATCH_SIZE", 4)))
     table_groups = _group_table_chunks(chunks)
 
@@ -489,14 +517,15 @@ async def review_document(
         for group in batch:
             table_rows = group.get("rows", [])
             local_table_issues = check_table_rules(table_rows, focus_areas)
-            if fast_local_only or client is None:
+            if fast_local_only:
                 llm_table_issues: List[Dict[str, Any]] = []
                 table_backend = "local"
                 field_summary: Dict[str, Any] = {}
                 critical_gaps: List[str] = []
             else:
+                table_client = ensure_client()
                 table_result = await _review_table_with_qwen(
-                    client, table_rows, focus_areas
+                    table_client, table_rows, focus_areas
                 )
                 llm_table_issues = table_result.get("table_issues", [])
                 table_backend = table_result.get("backend", "qwen")
@@ -551,19 +580,22 @@ async def review_document(
 
     for batch in _batch_items(chunks, batch_size):
         reviewable_chunks = [
-            chunk for chunk in batch if not bool(chunk.get("is_table"))
+            chunk
+            for chunk in batch
+            if not bool(chunk.get("is_table")) and not bool(chunk.get("is_code_block"))
         ]
         if reviewable_chunks:
             local_issue_sets = [
                 check_text_rules(chunk["text"], focus_areas)
                 for chunk in reviewable_chunks
             ]
-            if fast_local_only or client is None:
+            if fast_local_only:
                 llm_issue_sets = [[] for _ in reviewable_chunks]
             else:
+                text_client = ensure_client()
                 llm_issue_sets = await asyncio.gather(
                     *[
-                        _review_chunk_with_qwen(client, chunk, focus_areas)
+                        _review_chunk_with_qwen(text_client, chunk, focus_areas)
                         for chunk in reviewable_chunks
                     ]
                 )
@@ -573,6 +605,9 @@ async def review_document(
 
         reviewable_index = 0
         for chunk in batch:
+            if bool(chunk.get("is_code_block")):
+                chunk_reviews.append(_skipped_chunk_review(chunk, "code_block"))
+                continue
             if bool(chunk.get("is_table")):
                 table_key = (chunk.get("section_id"), chunk.get("table_index"))
                 if table_key in table_review_map and not any(

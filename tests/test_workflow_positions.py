@@ -95,6 +95,74 @@ class FakeTableClient:
         }
 
 
+@pytest.mark.asyncio
+async def test_review_document_skips_code_block(monkeypatch):
+    def fail_if_called(*args, **kwargs):
+        raise AssertionError("code blocks should skip AI and rule review")
+
+    monkeypatch.setattr(langgraph, "build_qwen_client", fail_if_called)
+    monkeypatch.setattr(langgraph, "check_text_rules", fail_if_called)
+
+    parsed_data = {
+        "sections": [
+            {
+                "id": 1,
+                "raw_text": (
+                    "using System.Collections;\n"
+                    "using System.Collections.Generic;\n"
+                    "using UnityEngine;\n"
+                    "public class CameraControllor : MonoBehaviour\n"
+                    "{\n"
+                    "    public void Start() {}\n"
+                    "}"
+                ),
+            }
+        ]
+    }
+
+    result = await langgraph.review_document(parsed_data)
+    chunk_reviews = result["chunk_reviews"]
+
+    assert len(chunk_reviews) == 1
+    assert chunk_reviews[0]["is_code_block"] is True
+    assert chunk_reviews[0]["review_skipped"] == "code_block"
+    assert chunk_reviews[0]["issue_count"] == 0
+    assert result["consistency_issues"] == []
+
+
+@pytest.mark.asyncio
+async def test_review_document_skips_code_block_with_comment_markers(monkeypatch):
+    def fail_if_called(*args, **kwargs):
+        raise AssertionError("code blocks should skip AI and rule review")
+
+    monkeypatch.setattr(langgraph, "build_qwen_client", fail_if_called)
+    monkeypatch.setattr(langgraph, "check_text_rules", fail_if_called)
+
+    parsed_data = {
+        "sections": [
+            {
+                "id": 1,
+                "raw_text": (
+                    "using DG.Tweening;#调用DOTween插件\n"
+                    "/// 相机动画\n"
+                    "public class CameraControllor : MonoBehaviour\n"
+                    "{\n"
+                    "    public int Count = 0;#计数\n"
+                    "}"
+                ),
+            }
+        ]
+    }
+
+    result = await langgraph.review_document(parsed_data)
+    chunk_reviews = result["chunk_reviews"]
+
+    assert len(chunk_reviews) == 1
+    assert chunk_reviews[0]["is_code_block"] is True
+    assert chunk_reviews[0]["review_skipped"] == "code_block"
+    assert chunk_reviews[0]["issue_count"] == 0
+
+
 def test_split_into_chunks_expands_table_rows():
     parsed_data = {
         "sections": [
