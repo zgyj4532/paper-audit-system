@@ -6,8 +6,12 @@ use std::fs;
 use std::path::{Path, PathBuf};
 
 use super::format::{format_to_json, merge_format};
-use super::types::{ParagraphInfo, ParseOptions, RunInfo, SectionInfo, TextFormat};
+use super::types::{ParagraphInfo, ParseOptions, RunInfo, SectionInfo, TableRowInfo, TextFormat};
 use super::xml::attr_value;
+
+fn max_usize(left: usize, right: usize) -> usize {
+    left.max(right)
+}
 
 pub(crate) fn temp_output_path(input_path: &Path) -> PathBuf {
     let base = std::env::var("RUST_TEMP_DIR").unwrap_or_else(|_| "./temp/rust_engine".to_string());
@@ -38,10 +42,22 @@ pub(crate) fn extract_sections(
     let mut current_cell_text = String::new();
     let mut current_row_cells: Vec<String> = Vec::new();
     let mut current_table_rows: Vec<Vec<String>> = Vec::new();
+    let mut current_table_row_positions: Vec<TableRowInfo> = Vec::new();
     let mut current_paragraph_images: Vec<String> = Vec::new();
     let mut current_paragraph_has_math = false;
     let mut current_paragraph_style: Option<String> = None;
     let mut current_paragraph_format = defaults.clone();
+    let mut current_page: usize = 1;
+    let mut saw_explicit_page_break = false;
+    let mut current_paragraph_index: usize = 0;
+    let mut current_row_index: usize = 0;
+    let mut current_paragraph_page_start: usize = 1;
+    let mut current_paragraph_page_end: usize = 1;
+    let mut current_paragraph_has_page_break = false;
+    let mut current_table_page_start: usize = 1;
+    let mut current_table_page_end: usize = 1;
+    let mut current_row_page_start: usize = 1;
+    let mut current_row_page_end: usize = 1;
     let mut in_para = false;
     let mut in_run = false;
     let mut in_text = false;
@@ -51,16 +67,34 @@ pub(crate) fn extract_sections(
     let mut in_cell = false;
     let mut in_para_props = false;
 
+    let mark_page_break = |current_page: &mut usize,
+                           saw_explicit_page_break: &mut bool,
+                           current_paragraph_page_end: &mut usize,
+                           current_row_page_end: &mut usize,
+                           current_table_page_end: &mut usize| {
+        *current_page += 1;
+        *saw_explicit_page_break = true;
+        *current_paragraph_page_end = *current_page;
+        *current_row_page_end = *current_page;
+        *current_table_page_end = *current_page;
+    };
+
     loop {
         match reader.read_event_into(&mut buf) {
             Ok(Event::Start(e)) if e.local_name().as_ref() == b"tbl" => {
                 in_table = true;
+                current_table_page_start = current_page;
+                current_table_page_end = current_page;
+                current_row_index = 0;
                 current_section = Some(SectionInfo {
                     element_type: "Table".to_string(),
                     is_table: true,
+                    page_start: Some(current_page),
+                    page_end: Some(current_page),
                     ..SectionInfo::default()
                 });
                 current_table_rows = Vec::new();
+                current_table_row_positions = Vec::new();
                 current_row_cells = Vec::new();
                 current_cell_text = String::new();
             }
@@ -72,14 +106,24 @@ pub(crate) fn extract_sections(
                         }
                         if !current_row_cells.is_empty() {
                             current_table_rows.push(current_row_cells.clone());
+                            current_row_index = current_row_index.max(current_table_rows.len());
+                            current_table_row_positions.push(TableRowInfo {
+                                row_index: current_row_index,
+                                cells: current_row_cells.clone(),
+                                page_start: current_row_page_start,
+                                page_end: current_row_page_end,
+                            });
                             current_row_cells.clear();
                         }
                         section.table_rows = current_table_rows.clone();
+                        section.table_row_positions = current_table_row_positions.clone();
                         section.text = current_table_rows
                             .iter()
                             .map(|row| row.join("\t"))
                             .collect::<Vec<_>>()
                             .join("\n");
+                        section.page_start = Some(current_table_page_start);
+                        section.page_end = Some(current_table_page_end);
                         sections.push(section);
                     }
                 }
@@ -98,10 +142,25 @@ pub(crate) fn extract_sections(
             }
             Ok(Event::Start(e)) if e.local_name().as_ref() == b"tr" => {
                 current_row_cells = Vec::new();
+                current_row_index += 1;
+                current_row_page_start = current_page;
+                current_row_page_end = current_page;
             }
             Ok(Event::End(e)) if e.local_name().as_ref() == b"tr" => {
                 if in_table && !current_row_cells.is_empty() {
                     current_table_rows.push(current_row_cells.clone());
+                    current_table_row_positions.push(TableRowInfo {
+                        row_index: current_row_index,
+                        cells: current_row_cells.clone(),
+                        page_start: current_row_page_start,
+                        page_end: current_row_page_end,
+                    });
+                    current_table_page_end =
+                        max_usize(current_table_page_end, current_row_page_end);
+                    if current_row_page_end > current_row_page_start {
+                        current_table_page_start =
+                            current_table_page_start.min(current_row_page_start);
+                    }
                     current_row_cells.clear();
                 }
             }
@@ -126,10 +185,17 @@ pub(crate) fn extract_sections(
                 current_paragraph_has_math = false;
                 current_paragraph_style = None;
                 current_paragraph_format = defaults.clone();
+                current_paragraph_page_start = current_page;
+                current_paragraph_page_end = current_page;
+                current_paragraph_has_page_break = false;
                 if current_section.is_none() {
+                    current_paragraph_index += 1;
                     current_section = Some(SectionInfo {
                         element_type: "Paragraph".to_string(),
                         is_table: false,
+                        paragraph_index: Some(current_paragraph_index),
+                        page_start: Some(current_page),
+                        page_end: Some(current_page),
                         ..SectionInfo::default()
                     });
                 }
@@ -155,6 +221,8 @@ pub(crate) fn extract_sections(
                             section.has_math = current_paragraph_has_math;
                             section.images = current_paragraph_images.clone();
                             section.paragraph_style = current_paragraph_style.clone();
+                            section.page_start = Some(current_paragraph_page_start);
+                            section.page_end = Some(current_paragraph_page_end);
                             sections.push(section.clone());
                             current_section = None;
                         } else if section.element_type == "Table" {
@@ -175,6 +243,21 @@ pub(crate) fn extract_sections(
             Ok(Event::End(e)) if e.local_name().as_ref() == b"pPr" => {
                 in_para_props = false;
                 in_para_run_pr = false;
+            }
+            Ok(Event::Start(e))
+                if in_para_props && e.local_name().as_ref() == b"pageBreakBefore" =>
+            {
+                if current_paragraph_page_start == current_page && !current_paragraph_has_page_break
+                {
+                    mark_page_break(
+                        &mut current_page,
+                        &mut saw_explicit_page_break,
+                        &mut current_paragraph_page_end,
+                        &mut current_row_page_end,
+                        &mut current_table_page_end,
+                    );
+                    current_paragraph_page_start = current_page;
+                }
             }
             Ok(Event::Start(e)) if in_para_props && e.local_name().as_ref() == b"rPr" => {
                 in_para_run_pr = true;
@@ -313,6 +396,33 @@ pub(crate) fn extract_sections(
             Ok(Event::End(e)) if e.local_name().as_ref() == b"t" => {
                 in_text = false;
             }
+            Ok(Event::Start(e)) | Ok(Event::Empty(e))
+                if in_run && e.local_name().as_ref() == b"br" =>
+            {
+                let break_type = attr_value(&e, b"type").unwrap_or_default();
+                if break_type == "page" {
+                    current_paragraph_has_page_break = true;
+                    mark_page_break(
+                        &mut current_page,
+                        &mut saw_explicit_page_break,
+                        &mut current_paragraph_page_end,
+                        &mut current_row_page_end,
+                        &mut current_table_page_end,
+                    );
+                }
+            }
+            Ok(Event::Start(e)) | Ok(Event::Empty(e))
+                if in_run && e.local_name().as_ref() == b"lastRenderedPageBreak" =>
+            {
+                current_paragraph_has_page_break = true;
+                mark_page_break(
+                    &mut current_page,
+                    &mut saw_explicit_page_break,
+                    &mut current_paragraph_page_end,
+                    &mut current_row_page_end,
+                    &mut current_table_page_end,
+                );
+            }
             Ok(Event::Text(e)) if in_run && in_text => {
                 if let Ok(text) = e.decode() {
                     current_run.text.push_str(&text);
@@ -352,12 +462,26 @@ pub(crate) fn build_response(
     });
     let mut last_known_size: Option<String> = defaults.size_pt.clone();
     let mut last_known_size_by_page: HashMap<usize, String> = HashMap::new();
+    let has_explicit_page_positions = sections_input
+        .iter()
+        .any(|section| section.page_start.unwrap_or(1) > 1 || section.page_end.unwrap_or(1) > 1);
+    let detected_pages = if has_explicit_page_positions {
+        sections_input
+            .iter()
+            .filter_map(|section| section.page_end.or(section.page_start))
+            .max()
+            .unwrap_or(1)
+    } else {
+        std::cmp::max(1, (sections_input.len() + 19) / 20)
+    };
 
     let sections = sections_input
         .iter()
         .enumerate()
         .map(|(index, section)| {
-            let page = (index / 20) + 1;
+            let page = section.page_start.or(section.page_end).unwrap_or((index / 20) + 1);
+            let page_end = section.page_end.or(section.page_start).unwrap_or(page);
+            let paragraph_index = section.paragraph_index.unwrap_or(index + 1);
             let mut section_format = if section.format.font.is_none() && section.format.size_pt.is_none() {
                 defaults.clone()
             } else {
@@ -397,6 +521,15 @@ pub(crate) fn build_response(
             section_json.insert("raw_text".to_string(), json!(section.text.clone()));
             section_json.insert("xml_path".to_string(), json!(format!("/w:body/w:p[{}]", index + 1)));
             section_json.insert("is_table".to_string(), json!(section.is_table));
+            section_json.insert(
+                "position".to_string(),
+                json!({
+                    "paragraph_index": paragraph_index,
+                    "page_start": page,
+                    "page_end": page_end,
+                    "xml_path": format!("/w:body/w:p[{}]", index + 1)
+                }),
+            );
             if options.extract_styles {
                 section_json.insert("formatting".to_string(), format_to_json(&section_format, "left"));
                 if let Some(style) = section.paragraph_style.as_ref() {
@@ -411,9 +544,9 @@ pub(crate) fn build_response(
                 section_json.insert(
                     "coordinates".to_string(),
                     json!({
-                        "page": (index / 20) + 1,
+                        "page": page,
                         "x": 0,
-                        "y": (index as f64) * 24.0,
+                        "y": (paragraph_index as f64) * 24.0,
                         "width": 450,
                         "height": 20
                     }),
@@ -422,6 +555,34 @@ pub(crate) fn build_response(
             section_json.insert("runs".to_string(), json!(runs));
             if !section.table_rows.is_empty() {
                 section_json.insert("table_rows".to_string(), json!(section.table_rows.clone()));
+                section_json.insert(
+                    "table_row_positions".to_string(),
+                    json!(
+                        section
+                            .table_row_positions
+                            .iter()
+                            .map(|row| {
+                                json!({
+                                    "row_index": row.row_index,
+                                    "cells": row.cells,
+                                    "page_start": row.page_start,
+                                    "page_end": row.page_end,
+                                    "is_cross_page": row.page_end > row.page_start,
+                                })
+                            })
+                            .collect::<Vec<_>>()
+                    ),
+                );
+                section_json.insert(
+                    "table_meta".to_string(),
+                    json!({
+                        "row_count": section.table_rows.len(),
+                        "column_count": section.table_rows.iter().map(|row| row.len()).max().unwrap_or(0),
+                        "page_start": page,
+                        "page_end": page_end,
+                        "is_cross_page": page_end > page,
+                    }),
+                );
             }
             if options.extract_images {
                 section_json.insert("images".to_string(), json!(section.images.clone()));
@@ -439,7 +600,8 @@ pub(crate) fn build_response(
         .count();
 
     let metadata = json!({
-        "total_pages": std::cmp::max(1, (sections_input.len() + 19) / 20),
+        "total_pages": detected_pages,
+        "page_numbering_mode": if has_explicit_page_positions { "explicit_or_mixed" } else { "estimated" },
         "total_words": word_count,
         "has_math": sections_input.iter().any(|section| section.has_math),
         "total_paragraphs": sections_input.iter().filter(|section| section.element_type == "Paragraph").count(),

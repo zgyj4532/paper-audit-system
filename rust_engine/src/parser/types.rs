@@ -29,6 +29,14 @@ pub(crate) struct RunInfo {
 }
 
 #[derive(Default, Clone)]
+pub(crate) struct TableRowInfo {
+    pub(crate) row_index: usize,
+    pub(crate) cells: Vec<String>,
+    pub(crate) page_start: usize,
+    pub(crate) page_end: usize,
+}
+
+#[derive(Default, Clone)]
 pub(crate) struct ParagraphInfo {
     pub(crate) text: String,
     pub(crate) runs: Vec<RunInfo>,
@@ -42,8 +50,12 @@ pub(crate) struct SectionInfo {
     pub(crate) runs: Vec<RunInfo>,
     pub(crate) format: TextFormat,
     pub(crate) table_rows: Vec<Vec<String>>,
+    pub(crate) table_row_positions: Vec<TableRowInfo>,
     pub(crate) images: Vec<String>,
     pub(crate) has_math: bool,
     pub(crate) is_table: bool,
     pub(crate) paragraph_style: Option<String>,
+    pub(crate) paragraph_index: Option<usize>,
+    pub(crate) page_start: Option<usize>,
+    pub(crate) page_end: Option<usize>,
 }

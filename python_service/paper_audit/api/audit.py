@@ -192,6 +192,104 @@ def _format_reference_note(index: int, entry: dict[str, Any]) -> str:
     return note
 
 
+def _freeze_issue_value(value: Any) -> Any:
+    if isinstance(value, dict):
+        return tuple(
+            sorted((str(key), _freeze_issue_value(item)) for key, item in value.items())
+        )
+    if isinstance(value, list):
+        return tuple(_freeze_issue_value(item) for item in value)
+    if isinstance(value, set):
+        return tuple(sorted(_freeze_issue_value(item) for item in value))
+    return value
+
+
+def _issue_signature(issue: dict[str, Any]) -> tuple[Any, ...]:
+    return (
+        str(issue.get("issue_type") or ""),
+        str(issue.get("field_name") or ""),
+        str(issue.get("original") or "").strip(),
+        str(issue.get("message") or "").strip(),
+        str(issue.get("suggestion") or "").strip(),
+        str(issue.get("rule_id") or "").strip(),
+        issue.get("severity"),
+        _freeze_issue_value(issue.get("position")),
+    )
+
+
+def _dedupe_issue_list(issues: list[dict[str, Any]]) -> list[dict[str, Any]]:
+    deduped: list[dict[str, Any]] = []
+    seen: set[tuple[Any, ...]] = set()
+    for issue in issues:
+        if not isinstance(issue, dict):
+            continue
+        signature = _issue_signature(issue)
+        if signature in seen:
+            continue
+        seen.add(signature)
+        deduped.append(issue)
+    return deduped
+
+
+def _compact_chunk_review_for_report(chunk_review: dict[str, Any]) -> dict[str, Any]:
+    compacted = dict(chunk_review)
+    issue_views: dict[str, list[dict[str, Any]]] = {}
+
+    for key in ("local_issues", "llm_issues", "table_issues", "issues"):
+        value = compacted.get(key)
+        if isinstance(value, list):
+            issue_views[key] = _dedupe_issue_list(
+                [issue for issue in value if isinstance(issue, dict)]
+            )
+
+    if issue_views:
+        merged_issues = issue_views.get("issues", [])
+        if not merged_issues:
+            merged_issues = _dedupe_issue_list(
+                [
+                    *issue_views.get("local_issues", []),
+                    *issue_views.get("llm_issues", []),
+                    *issue_views.get("table_issues", []),
+                ]
+            )
+        compacted["issues"] = merged_issues
+        compacted["issue_count"] = len(merged_issues)
+
+        for key in ("local_issues", "llm_issues", "table_issues"):
+            current = issue_views.get(key, [])
+            if not current or current == merged_issues:
+                compacted.pop(key, None)
+            else:
+                compacted[key] = current
+
+    if isinstance(compacted.get("row_reviews"), list):
+        compacted["row_reviews"] = [
+            (
+                _compact_chunk_review_for_report(row_review)
+                if isinstance(row_review, dict)
+                else row_review
+            )
+            for row_review in compacted["row_reviews"]
+        ]
+
+    return compacted
+
+
+def _compact_ai_review_for_report(ai_review: dict[str, Any]) -> dict[str, Any]:
+    compacted = dict(ai_review)
+    chunk_reviews = compacted.get("chunk_reviews")
+    if isinstance(chunk_reviews, list):
+        compacted["chunk_reviews"] = [
+            (
+                _compact_chunk_review_for_report(chunk_review)
+                if isinstance(chunk_review, dict)
+                else chunk_review
+            )
+            for chunk_review in chunk_reviews
+        ]
+    return compacted
+
+
 def _estimate_page_size(
     max_right: float, max_bottom: float, note_count: int
 ) -> tuple[float, float, float, float]:
@@ -549,6 +647,14 @@ async def _process_task(task_id: int, file_path: str, *, resume: bool = False) -
                 + len(consistency_issues),
             }
 
+            report_payload_for_json = dict(report_payload)
+            report_payload_for_json["ai_review"] = _compact_ai_review_for_report(
+                ai_review
+            )
+            report_payload_for_json["chunk_reviews"] = report_payload_for_json[
+                "ai_review"
+            ].get("chunk_reviews", chunk_reviews)
+
             checkpoint.update(
                 {
                     "stage": "annotated",
@@ -564,7 +670,7 @@ async def _process_task(task_id: int, file_path: str, *, resume: bool = False) -
             should_write_report_json = report_payload["issues_count"] > 0
             if should_write_report_json:
                 report_path.write_text(
-                    json.dumps(report_payload, ensure_ascii=False, indent=2),
+                    json.dumps(report_payload_for_json, ensure_ascii=False, indent=2),
                     encoding="utf-8",
                 )
             elif report_path.exists():
@@ -572,7 +678,7 @@ async def _process_task(task_id: int, file_path: str, *, resume: bool = False) -
 
             try:
                 pdf_path = output_dir / f"report_{task_id}.pdf"
-                _render_pdf_annotation_report(report_payload, pdf_path)
+                _render_pdf_annotation_report(report_payload_for_json, pdf_path)
             except Exception:
                 pdf_path = None
 

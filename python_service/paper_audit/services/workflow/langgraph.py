@@ -22,6 +22,7 @@ from ..vector import (
 
 class AuditState(TypedDict, total=False):
     parsed_data: Dict[str, Any]
+    source_file: str
     chunks: List[Dict[str, Any]]
     chunk_reviews: List[Dict[str, Any]]
     reference_verification: List[Dict[str, Any]]
@@ -121,6 +122,33 @@ def _issue_span(issue: Dict[str, Any]) -> tuple[int | None, int | None]:
     return None, None
 
 
+def _freeze_issue_value(value: Any) -> Any:
+    if isinstance(value, dict):
+        return tuple(
+            sorted((str(key), _freeze_issue_value(item)) for key, item in value.items())
+        )
+    if isinstance(value, list):
+        return tuple(_freeze_issue_value(item) for item in value)
+    if isinstance(value, set):
+        return tuple(sorted(_freeze_issue_value(item) for item in value))
+    return value
+
+
+def _issue_signature(issue: Dict[str, Any]) -> tuple[Any, ...]:
+    if not isinstance(issue, dict):
+        return ()
+    return (
+        str(issue.get("issue_type") or ""),
+        str(issue.get("field_name") or ""),
+        str(issue.get("original") or "").strip(),
+        str(issue.get("message") or "").strip(),
+        str(issue.get("suggestion") or "").strip(),
+        str(issue.get("rule_id") or "").strip(),
+        issue.get("severity"),
+        _freeze_issue_value(issue.get("position")),
+    )
+
+
 def _issue_label(issue: Dict[str, Any]) -> str:
     if not isinstance(issue, dict):
         return ""
@@ -154,11 +182,16 @@ def _is_same_issue(
 
 def _dedupe_issues(issues: List[Dict[str, Any]]) -> List[Dict[str, Any]]:
     deduped: List[Dict[str, Any]] = []
+    seen: set[tuple[Any, ...]] = set()
     for issue in issues:
         if not isinstance(issue, dict):
             continue
-        if any(_is_same_issue(existing, issue) for existing in deduped):
+        signature = _issue_signature(issue)
+        if signature in seen or any(
+            _is_same_issue(existing, issue) for existing in deduped
+        ):
             continue
+        seen.add(signature)
         deduped.append(issue)
     return deduped
 
@@ -439,7 +472,9 @@ async def verify_references(references: List[Dict[str, Any]]) -> List[Dict[str, 
     return results
 
 
-async def review_document(parsed_data: Dict[str, Any]) -> Dict[str, Any]:
+async def review_document(
+    parsed_data: Dict[str, Any], source_file: str | None = None
+) -> Dict[str, Any]:
     focus_areas = normalize_focus_areas(None)
     chunks = split_into_chunks(parsed_data)
     chunk_reviews: List[Dict[str, Any]] = []
@@ -468,7 +503,11 @@ async def review_document(parsed_data: Dict[str, Any]) -> Dict[str, Any]:
                 field_summary = table_result.get("field_summary", {})
                 critical_gaps = table_result.get("critical_gaps", [])
 
-            merged_table_issues = _dedupe_issues(local_table_issues + llm_table_issues)
+            normalized_local_table_issues = _dedupe_issues(local_table_issues)
+            normalized_llm_table_issues = _dedupe_issues(llm_table_issues)
+            merged_table_issues = _dedupe_issues(
+                normalized_local_table_issues + normalized_llm_table_issues
+            )
             row_reviews: List[Dict[str, Any]] = []
             for row in table_rows:
                 row_index = row.get("row_index")
@@ -500,8 +539,8 @@ async def review_document(parsed_data: Dict[str, Any]) -> Dict[str, Any]:
                 "is_table": True,
                 "rows": table_rows,
                 "row_reviews": row_reviews,
-                "local_issues": local_table_issues,
-                "llm_issues": llm_table_issues,
+                "local_issues": normalized_local_table_issues,
+                "llm_issues": normalized_llm_table_issues,
                 "table_issues": merged_table_issues,
                 "issues": merged_table_issues,
                 "issue_count": len(merged_table_issues),
@@ -556,6 +595,8 @@ async def review_document(parsed_data: Dict[str, Any]) -> Dict[str, Any]:
                 [issue for issue in llm_issues if isinstance(issue, dict)],
                 chunk["text"],
             )
+            normalized_local_issues = _dedupe_issues(normalized_local_issues)
+            normalized_llm_issues = _dedupe_issues(normalized_llm_issues)
             merged_issues = _dedupe_issues(
                 normalized_local_issues + normalized_llm_issues
             )
@@ -574,7 +615,7 @@ async def review_document(parsed_data: Dict[str, Any]) -> Dict[str, Any]:
 
     references = detect_reference_entries(parsed_data)
     reference_verification = await verify_references(references)
-    consistency_issues = check_consistency_rules(parsed_data)
+    consistency_issues = check_consistency_rules(parsed_data, source_file=source_file)
 
     return {
         "backend": "qwen",
@@ -608,7 +649,7 @@ def build_workflow():
 
     async def review_node(state: AuditState) -> Dict[str, Any]:
         parsed_data = state.get("parsed_data", {})
-        return await review_document(parsed_data)
+        return await review_document(parsed_data, state.get("source_file"))
 
     graph.add_node("splitter", splitter_node)
     graph.add_node("review", review_node)

@@ -1,6 +1,8 @@
 from .engine import (
     DEFAULT_FOCUS_AREAS,
     check_consistency_rules,
+    check_document_rules,
+    check_reference_content_rules,
     check_table_rules,
     check_text_rules,
     detect_reference_entries,
@@ -10,6 +12,8 @@ from .engine import (
 __all__ = [
     "DEFAULT_FOCUS_AREAS",
     "check_consistency_rules",
+    "check_document_rules",
+    "check_reference_content_rules",
     "check_table_rules",
     "check_text_rules",
     "detect_reference_entries",

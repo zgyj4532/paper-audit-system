@@ -30,6 +30,25 @@ class FakeTextClient:
         }
 
 
+class FakeDuplicateTextClient:
+    async def review_chunk(
+        self, text, *, section_id=None, strictness=3, focus_areas=None
+    ):
+        issue = {
+            "issue_type": "format",
+            "severity": 3,
+            "position": {
+                "start_char": 18,
+                "end_char": 20,
+            },
+            "original": "杨力老师以及他的学生闫珍锜学长",
+            "message": "称呼不规范，避免使用“学长”",
+            "suggestion": "杨力老师及其指导的学生闫珍锜",
+            "rule_id": "APA-4.03",
+        }
+        return {"issues": [issue, dict(issue)]}
+
+
 class FakeTableClient:
     def __init__(self):
         self.review_table_called = False
@@ -133,6 +152,34 @@ async def test_review_document_expands_issue_span_from_original(monkeypatch):
     assert expected_start >= 0
     assert issue["position"]["start_char"] == expected_start
     assert issue["position"]["end_char"] == expected_start + len(original)
+
+
+@pytest.mark.asyncio
+async def test_review_document_dedupes_duplicate_ai_issues(monkeypatch):
+    monkeypatch.setattr(
+        langgraph, "build_qwen_client", lambda: FakeDuplicateTextClient()
+    )
+    monkeypatch.setattr(langgraph, "check_text_rules", lambda text, focus_areas: [])
+
+    parsed_data = {
+        "sections": [
+            {
+                "id": 25,
+                "raw_text": (
+                    "我首先要感谢我的论文指导老师，中国计量大学信息工程学院的杨力老师以及他的学生闫珍锜学长。"
+                    "他们对我论文的研究方向做出了指导性的意见和帮助。"
+                ),
+            }
+        ]
+    }
+
+    result = await langgraph.review_document(parsed_data)
+    chunk_reviews = result["chunk_reviews"]
+
+    assert len(chunk_reviews) == 1
+    assert len(chunk_reviews[0]["llm_issues"]) == 1
+    assert len(chunk_reviews[0]["issues"]) == 1
+    assert chunk_reviews[0]["issue_count"] == 1
 
 
 @pytest.mark.asyncio
