@@ -57,6 +57,7 @@ class Settings(BaseSettings):
     SQLITE_DB_PATH: Path = Path("./data/tasks.db")
     CHROMA_PERSIST_DIR: Path = Path("./data/chroma_db")
     CHROMA_COLLECTION_NAME: str = "academic_papers"
+    CUSTOM_FONT_DIR: Path | None = None
     MAX_UPLOAD_SIZE: int = 50
     MAX_CONCURRENT_TASKS: int = 3
     UPLOAD_RETENTION_DAYS: int = 7

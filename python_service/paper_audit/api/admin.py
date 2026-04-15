@@ -1,7 +1,7 @@
 from __future__ import annotations
 
 import zipfile
-from datetime import datetime, timedelta
+from datetime import datetime, timedelta, timezone
 from pathlib import Path
 from typing import Any
 
@@ -10,7 +10,7 @@ from fastapi import APIRouter, HTTPException
 from pydantic import BaseModel, Field
 
 from ..config import settings
-from ..core.task_queue import TaskQueue
+from ..core.task_queue import TaskQueue, UTC_PLUS_8
 from ..services.vector.store import index_paper
 
 router = APIRouter()
@@ -67,8 +67,21 @@ def _collect_files(root: Path, patterns: tuple[str, ...]) -> list[Path]:
     return [path for path in files if path.is_file()]
 
 
+def _parse_task_datetime(value: Any) -> datetime:
+    if isinstance(value, datetime):
+        parsed = value
+    elif isinstance(value, str):
+        parsed = datetime.fromisoformat(value)
+    else:
+        return datetime.now(UTC_PLUS_8)
+
+    if parsed.tzinfo is None:
+        parsed = parsed.replace(tzinfo=timezone.utc)
+    return parsed.astimezone(UTC_PLUS_8)
+
+
 async def _list_completed_tasks_older_than(days: int) -> list[dict[str, Any]]:
-    cutoff = datetime.now() - timedelta(days=days)
+    cutoff = datetime.now(UTC_PLUS_8) - timedelta(days=days)
     tasks: list[dict[str, Any]] = []
     async with aiosqlite.connect(str(settings.SQLITE_DB_PATH)) as db:
         cur = await db.execute(
@@ -77,14 +90,10 @@ async def _list_completed_tasks_older_than(days: int) -> list[dict[str, Any]]:
         rows = await cur.fetchall()
     for row in rows:
         task = TaskQueue.row_to_dict(row)
-        updated_at = task.get("updated_at")
         try:
-            if isinstance(updated_at, str):
-                updated_dt = datetime.fromisoformat(updated_at)
-            else:
-                updated_dt = datetime.now()
+            updated_dt = _parse_task_datetime(task.get("updated_at"))
         except Exception:
-            updated_dt = datetime.now()
+            updated_dt = datetime.now(UTC_PLUS_8)
         if updated_dt <= cutoff:
             tasks.append(task)
     return tasks

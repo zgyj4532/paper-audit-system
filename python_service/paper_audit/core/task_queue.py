@@ -1,5 +1,6 @@
 import aiosqlite
 import asyncio
+from datetime import datetime, timedelta, timezone
 from pathlib import Path
 
 TASK_COLUMNS = (
@@ -15,6 +16,21 @@ TASK_COLUMNS = (
     "checkpoint_data",
     "updated_at",
 )
+
+UTC_PLUS_8 = timezone(timedelta(hours=8))
+
+
+def _now_utc8_iso() -> str:
+    return datetime.now(UTC_PLUS_8).isoformat(sep=" ", timespec="seconds")
+
+
+def _to_utc8_iso(value):
+    if value is None or not isinstance(value, str):
+        return value
+    parsed = datetime.fromisoformat(value)
+    if parsed.tzinfo is None:
+        parsed = parsed.replace(tzinfo=timezone.utc)
+    return parsed.astimezone(UTC_PLUS_8).isoformat(sep=" ", timespec="seconds")
 
 
 class TaskQueue:
@@ -52,10 +68,11 @@ class TaskQueue:
                 await db.commit()
 
     async def create_task(self, file_path: str) -> int:
+        now = _now_utc8_iso()
         async with aiosqlite.connect(self.db_path) as db:
             cur = await db.execute(
-                "INSERT INTO tasks (file_path, status, progress, result_path, error_message, current_stage, error_log, checkpoint_data) VALUES (?, ?, ?, ?, ?, ?, ?, ?)",
-                (file_path, "queued", 0, None, None, "queued", None, None),
+                "INSERT INTO tasks (file_path, status, progress, result_path, error_message, created_at, current_stage, error_log, checkpoint_data, updated_at) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
+                (file_path, "queued", 0, None, None, now, "queued", None, None, now),
             )
             await db.commit()
             return cur.lastrowid
@@ -112,7 +129,8 @@ class TaskQueue:
             updates.append("checkpoint_data = ?")
             values.append(checkpoint_data)
 
-        updates.append("updated_at = CURRENT_TIMESTAMP")
+        updates.append("updated_at = ?")
+        values.append(_now_utc8_iso())
 
         if not updates:
             return
@@ -133,4 +151,7 @@ class TaskQueue:
     def row_to_dict(row):
         if row is None:
             return None
-        return dict(zip(TASK_COLUMNS, row))
+        data = dict(zip(TASK_COLUMNS, row))
+        data["created_at"] = _to_utc8_iso(data.get("created_at"))
+        data["updated_at"] = _to_utc8_iso(data.get("updated_at"))
+        return data

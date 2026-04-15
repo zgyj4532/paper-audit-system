@@ -16,10 +16,13 @@ async def test_create_and_get_task(tmp_path):
     task_id = await tq.create_task("/tmp/example.docx")
     row = await tq.get_task(task_id)
     assert row is not None
-    assert row[0] == task_id
-    assert row[1] == "/tmp/example.docx"
-    assert row[2] == "queued"
-    assert row[3] == 0
+    task = TaskQueue.row_to_dict(row)
+    assert task["id"] == task_id
+    assert task["file_path"] == "/tmp/example.docx"
+    assert task["status"] == "queued"
+    assert task["progress"] == 0
+    assert task["created_at"].endswith("+08:00")
+    assert task["updated_at"].endswith("+08:00")
     await tq.update_task(
         task_id,
         status="done",
@@ -28,6 +31,9 @@ async def test_create_and_get_task(tmp_path):
         error_message=None,
     )
     updated = await tq.get_task(task_id)
-    assert updated[2] == "done"
-    assert updated[3] == 100
-    assert updated[4] == "/tmp/result.zip"
+    updated_task = TaskQueue.row_to_dict(updated)
+    assert updated_task["status"] == "done"
+    assert updated_task["progress"] == 100
+    assert updated_task["result_path"] == "/tmp/result.zip"
+    assert updated_task["created_at"].endswith("+08:00")
+    assert updated_task["updated_at"].endswith("+08:00")

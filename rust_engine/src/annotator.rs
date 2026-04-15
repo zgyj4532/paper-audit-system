@@ -124,7 +124,8 @@ pub fn annotate_document(
     // Build comments XML and collect insertions for comment markers around paragraph-level xml_path if available
     let mut comments = Vec::new();
     // collect insertions to apply from back to front to avoid shifting indices
-    let mut insertions: Vec<(usize, String)> = Vec::new();
+    // The second field controls same-position ordering: larger values are inserted first.
+    let mut insertions: Vec<(usize, u8, String)> = Vec::new();
     if let Some(array) = issues.as_array() {
         for (i, item) in array.iter().enumerate() {
             let id = (i + 1) as i32;
@@ -157,15 +158,14 @@ pub fn annotate_document(
                     }
                     if let Some(spos) = insert_pos_start {
                         let start_marker = format!("<w:commentRangeStart w:id=\"{}\"/>", id);
-                        insertions.push((spos, start_marker));
+                        insertions.push((spos, 0, start_marker));
                     }
                     if let Some(epos) = insert_pos_end {
                         let end_marker = format!("<w:commentRangeEnd w:id=\"{}\"/>", id);
                         let ref_run = format!("<w:r><w:commentReference w:id=\"{}\"/></w:r>", id);
                         // insert end marker before </w:p>, and the reference run immediately after it
-                        let end_marker_len = end_marker.len();
-                        insertions.push((epos, end_marker));
-                        insertions.push((epos + end_marker_len, ref_run));
+                        insertions.push((epos, 1, end_marker));
+                        insertions.push((epos, 2, ref_run));
                     }
                 }
             }
@@ -174,10 +174,10 @@ pub fn annotate_document(
 
     // Apply collected insertions from highest index to lowest to avoid shifting earlier offsets.
     if !insertions.is_empty() {
-        // sort by position descending
-        insertions.sort_by(|a, b| b.0.cmp(&a.0));
+        // sort by position descending, then by same-position priority descending
+        insertions.sort_by(|a, b| b.0.cmp(&a.0).then_with(|| b.1.cmp(&a.1)));
         let mut doc_len = doc_xml.len();
-        for (mut pos, content) in insertions {
+        for (mut pos, _, content) in insertions {
             // clamp position
             if pos > doc_len {
                 pos = doc_len;

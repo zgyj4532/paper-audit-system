@@ -202,30 +202,6 @@ data/
 ```
 
 - 上传文件默认保留 7 天。
-- 临时 Rust 解析 JSON 在任务完成后删除。
-- 报告默认保留 30 天，可归档。
-
-### Rust HTTP 引擎
-
-Rust 服务是纯 HTTP 接口，默认监听 `http://localhost:8080`，主要负责三个端点：
-
-- `GET /health`：返回健康状态、版本和系统信息。
-- `POST /parse`：解析 DOCX，输出 sections、metadata、temp_output_path。
-- `POST /annotate`：把 issues 写回原始 DOCX，生成带批注文件。
-
-内部模块可以概括为三层：
-
-| 模块 | 输入 | 输出 | 作用 |
-| ------ | ------ | ------ | ------ |
-| Parser | `word/document.xml`、`word/styles.xml` | `Section`、`StyleTree` | 提取结构、样式和文本 |
-| LayoutModeler | 段落高度、行距、页面参数 | 坐标、页码、缩进 | 估算排版位置 |
-| Annotator | `issues`、原始 DOCX | 带批注 DOCX | 生成 comments.xml 并回写 |
-
-### 向量数据库层
-
-ChromaDB 用于本地文献召回，集合名默认是 `academic_papers`。它的作用不是最终判定，而是给 Qwen 提供更准确的上下文。
-
-元数据结构如下：
 
 ```json
 {
@@ -262,6 +238,7 @@ Qwen API 负责三件事：
 | ChromaDB | 本地向量召回 |
 | DashScope / Qwen API | 审查与文献核验 |
 | PyMuPDF | PDF 报告生成 |
+| LibreOffice / soffice | DOCX→PDF 基础转换 |
 | python-docx | Word 辅助处理 |
 | python-multipart | 文件上传 |
 
@@ -316,6 +293,105 @@ DEFAULT_STRICTNESS=3
 - 审查阶段会先执行本地规则，再执行 Qwen 审查和文献核验。
 - 任务完成后，报告 JSON、PDF 和 ZIP 会输出到 `outputs/`。
 - 临时 Rust 解析 JSON 会在任务结束后清理。
+
+### DOCX→PDF 环境检测
+
+PDF 报告统一优先走 LibreOffice/soffice 进行 DOCX→PDF 基础转换，再叠加批注。如果基础转换不可用，系统会自动回退到重建式渲染，并在日志和报告里输出 warning。
+
+### LibreOffice 安装说明
+
+LibreOffice 是系统级软件，不是 Python 包，不能通过 `uv add` 安装。`soffice` 是 LibreOffice 的命令行入口，装好 LibreOffice 后通常就能直接调用。
+
+#### Windows
+
+推荐直接安装官方安装包：
+
+1. 打开 LibreOffice 官网下载页并安装 Windows 版本。
+2. 安装时保持默认组件即可，命令行工具会一并安装。
+3. 安装后重新打开 PowerShell，执行下面命令确认：
+
+```powershell
+where.exe soffice.exe
+where.exe libreoffice.exe
+soffice.exe --version
+```
+
+如果 `where.exe` 能返回路径并且 `--version` 能输出版本号，就说明安装成功。
+
+也可以用包管理器安装：
+
+```powershell
+winget install TheDocumentFoundation.LibreOffice
+```
+
+#### Linux
+
+Linux 发行版通常直接通过系统包管理器安装：
+
+Ubuntu / Debian：
+
+```bash
+sudo apt update
+sudo apt install -y libreoffice
+```
+
+Fedora：
+
+```bash
+sudo dnf install -y libreoffice
+```
+
+Arch Linux：
+
+```bash
+sudo pacman -S libreoffice-fresh
+```
+
+安装后执行：
+
+```bash
+which soffice
+which libreoffice
+soffice --version
+libreoffice --version
+```
+
+#### 说明
+
+- 本项目只需要 LibreOffice 作为 DOCX→PDF 基础转换器。
+- Windows 和 Linux 都建议统一安装 LibreOffice，这样转换行为最一致。
+- 如果系统里找不到 `soffice`，PDF 会回退到重建式渲染，并输出 warning。
+- Windows 安装后如果终端里还找不到命令，先重新打开 PowerShell；必要时把 `C:\Program Files\LibreOffice\program` 加到 PATH。
+
+#### Windows
+
+Windows 环境下请安装 LibreOffice，并用下面命令检查：
+
+```powershell
+Get-Command soffice -ErrorAction SilentlyContinue
+Get-Command libreoffice -ErrorAction SilentlyContinue
+where.exe soffice.exe
+where.exe libreoffice.exe
+```
+
+如果以上命令能定位到 `soffice.exe` 或 `libreoffice.exe`，一般说明 LibreOffice 可用。
+
+#### Linux
+
+Linux 上统一检查 LibreOffice / soffice：
+
+```bash
+which soffice
+which libreoffice
+soffice --version
+libreoffice --version
+```
+
+如果命令返回路径或版本号，说明机器具备 DOCX→PDF 转换能力；如果都不存在，PDF 会回退到重建式渲染。
+
+#### 统一建议
+
+如果你的目标是稳定、可部署、跨平台一致，建议 Windows 和 Linux 都安装 LibreOffice，并把它作为唯一的 DOCX→PDF 基础转换器。这样 PDF 的 warning、回退和验收路径会更一致。
 
 ### Linux 中文字体说明
 
