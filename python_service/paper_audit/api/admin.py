@@ -11,6 +11,7 @@ from pydantic import BaseModel, Field
 
 from ..config import settings
 from ..core.task_queue import TaskQueue, UTC_PLUS_8
+from ..services.artifacts import ensure_task_zip_artifact
 from ..services.vector.store import index_paper
 
 router = APIRouter()
@@ -201,11 +202,8 @@ async def admin_archive(payload: ArchiveRequest) -> dict[str, Any]:
 
     with zipfile.ZipFile(archive_path, "w", compression=zipfile.ZIP_DEFLATED) as bundle:
         for task in tasks:
-            result_path = task.get("result_path")
-            if not result_path:
-                continue
-            result_file = Path(result_path)
-            if result_file.exists():
+            result_file, _ = ensure_task_zip_artifact(task["id"], task, output_dir)
+            if result_file and result_file.exists():
                 bundle.write(result_file, arcname=result_file.name)
             report_json = output_dir / f"report_{task['id']}.json"
             if report_json.exists():

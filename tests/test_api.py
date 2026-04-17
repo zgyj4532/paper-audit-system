@@ -120,12 +120,13 @@ async def test_audit_endpoint(tmp_path, monkeypatch):
         assert task_data["current_stage"] == "completed"
         assert "error_log" in task_data
         assert task_data["result_path"]
+        assert Path(task_data["result_path"]).suffix.lower() == ".json"
 
         report_resp = await ac.get(f"/api/v1/report/{task_id}")
         assert report_resp.status_code == 200
         report = report_resp.json()
         assert report["task_id"] == task_id
-        assert report["annotated_path"]
+        assert report["source_file"]
         assert report["ai_review"]["backend"] == "qwen"
 
         download_resp = await ac.get(f"/api/v1/download/{task_id}?type=zip")

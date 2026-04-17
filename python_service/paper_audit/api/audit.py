@@ -7,7 +7,6 @@ import os
 import re
 import shutil
 import subprocess
-import zipfile
 from collections import defaultdict
 from pathlib import Path
 from typing import Any
@@ -687,7 +686,11 @@ def _resolve_libreoffice_converter() -> tuple[str | None, list[str]]:
 
     candidate_paths: list[Path] = []
 
-    for executable_name in ("soffice.exe", "libreoffice.exe"):
+    executable_names = ["soffice", "libreoffice"]
+    if os.name == "nt":
+        executable_names.extend(["soffice.exe", "libreoffice.exe"])
+
+    for executable_name in executable_names:
         resolved = shutil.which(executable_name)
         if resolved:
             candidate_paths.append(Path(resolved))
@@ -701,10 +704,18 @@ def _resolve_libreoffice_converter() -> tuple[str | None, list[str]]:
         elif env_path.is_dir():
             candidate_paths.extend(
                 [
+                    env_path / "soffice",
+                    env_path / "libreoffice",
+                ]
+            )
+            candidate_paths.extend(
+                [
                     env_path / "soffice.exe",
                     env_path / "libreoffice.exe",
                     env_path / "program" / "soffice.exe",
                     env_path / "program" / "libreoffice.exe",
+                    env_path / "program" / "soffice",
+                    env_path / "program" / "libreoffice",
                 ]
             )
 
@@ -720,6 +731,8 @@ def _resolve_libreoffice_converter() -> tuple[str | None, list[str]]:
             root_path = Path(root)
             candidate_paths.extend(
                 [
+                    root_path / "LibreOffice" / "program" / "soffice",
+                    root_path / "LibreOffice" / "program" / "libreoffice",
                     root_path / "LibreOffice" / "program" / "soffice.exe",
                     root_path / "LibreOffice" / "program" / "libreoffice.exe",
                     root_path / "Programs" / "LibreOffice" / "program" / "soffice.exe",
@@ -1003,9 +1016,17 @@ def _render_pdf_annotation_report(
     import fitz
 
     generation_warnings: list[str] = []
-    annotated_path = report_payload.get("annotated_path")
-    if isinstance(annotated_path, str):
-        source_docx = Path(annotated_path)
+    source_docx_candidates: list[Path] = []
+    for key in ("annotated_path", "source_file", "file_path"):
+        value = report_payload.get(key)
+        if isinstance(value, str) and value.strip():
+            candidate = Path(value)
+            if candidate.suffix.lower() == ".docx" and candidate not in source_docx_candidates:
+                source_docx_candidates.append(candidate)
+
+    for source_docx in source_docx_candidates:
+        if not source_docx.exists():
+            continue
         with tempfile.TemporaryDirectory(prefix="paper_audit_pdf_") as scratch_dir:
             converted_pdf, conversion_warnings = _convert_docx_to_pdf(
                 source_docx, Path(scratch_dir)
@@ -1024,6 +1045,12 @@ def _render_pdf_annotation_report(
                     generation_warnings.append(
                         "基础 PDF 已生成，但叠加批注失败，已回退到重建式 PDF 渲染。"
                     )
+                    break
+
+    if source_docx_candidates:
+        generation_warnings.append(
+            "未找到可用的 DOCX 源文件，已回退到重建式 PDF 渲染。"
+        )
 
     parsed_data = _extract_parsed_data(report_payload)
     sections = _extract_sections(parsed_data)
@@ -1326,7 +1353,6 @@ async def _process_task(task_id: int, file_path: str, *, resume: bool = False) -
         output_dir = settings.PYTHON_OUTPUT_DIR
         output_dir.mkdir(parents=True, exist_ok=True)
         report_path = output_dir / f"report_{task_id}.json"
-        zip_path = output_dir / f"task_{task_id}.zip"
         task_row = await tq.get_task(task_id)
         checkpoint = (
             _decode_checkpoint(TaskQueue.row_to_dict(task_row) if task_row else None)
@@ -1386,15 +1412,7 @@ async def _process_task(task_id: int, file_path: str, *, resume: bool = False) -
             chunk_reviews = ai_review.get("chunk_reviews", [])
             reference_results = ai_review.get("reference_verification", [])
             consistency_issues = ai_review.get("consistency_issues", [])
-            await tq.update_task(task_id, progress=75, current_stage="annotating")
-
-            issues = parsed_data.get("sections", [])
-            annotate_result = await rust_client.annotate(
-                absolute_file_path,
-                issues,
-                output_filename=f"{task_id}_annotated.docx",
-            )
-            annotated_path = annotate_result.get("output_path")
+            await tq.update_task(task_id, progress=75, current_stage="reporting")
 
             report_payload = {
                 "task_id": task_id,
@@ -1404,7 +1422,6 @@ async def _process_task(task_id: int, file_path: str, *, resume: bool = False) -
                 "ai_review": ai_review,
                 "reference_verification": reference_results,
                 "chunk_reviews": chunk_reviews,
-                "annotated_path": annotated_path,
                 "issues_count": sum(
                     item.get("issue_count", 0) for item in chunk_reviews
                 )
@@ -1424,85 +1441,25 @@ async def _process_task(task_id: int, file_path: str, *, resume: bool = False) -
                 "ai_review"
             ].get("chunk_reviews", chunk_reviews)
 
+            report_path.write_text(
+                json.dumps(report_payload_for_json, ensure_ascii=False, indent=2),
+                encoding="utf-8",
+            )
+
             checkpoint.update(
                 {
-                    "stage": "annotated",
-                    "annotated_path": annotated_path,
+                    "stage": "reported",
                     "report_path": str(report_path),
-                    "zip_path": str(zip_path),
                 }
             )
             await _save_checkpoint(
-                tq, task_id, checkpoint, current_stage="annotating", progress=90
+                tq, task_id, checkpoint, current_stage="reporting", progress=90
             )
-
-            should_write_report_json = report_payload["issues_count"] > 0
-            pdf_generation_warnings: list[str] = []
-            if should_write_report_json:
-                report_path.write_text(
-                    json.dumps(report_payload_for_json, ensure_ascii=False, indent=2),
-                    encoding="utf-8",
-                )
-            elif report_path.exists():
-                report_path.unlink()
-
-            try:
-                pdf_path = output_dir / f"report_{task_id}.pdf"
-                pdf_generation_warnings = _render_pdf_annotation_report(
-                    report_payload_for_json, pdf_path
-                )
-            except Exception:
-                pdf_path = None
-                pdf_generation_warnings = ["PDF 生成失败：未能完成渲染或保存。"]
-
-            if pdf_generation_warnings:
-                for warning in pdf_generation_warnings:
-                    logger.warning("task %s pdf warning: %s", task_id, warning)
-                report_payload_for_json["pdf_generation_warnings"] = (
-                    pdf_generation_warnings
-                )
-                if not report_path.exists():
-                    report_path.write_text(
-                        json.dumps(
-                            report_payload_for_json, ensure_ascii=False, indent=2
-                        ),
-                        encoding="utf-8",
-                    )
-                else:
-                    report_path.write_text(
-                        json.dumps(
-                            report_payload_for_json, ensure_ascii=False, indent=2
-                        ),
-                        encoding="utf-8",
-                    )
-
-            with zipfile.ZipFile(
-                zip_path, "w", compression=zipfile.ZIP_DEFLATED
-            ) as archive:
-                if annotated_path and Path(annotated_path).exists():
-                    archive.write(annotated_path, arcname=Path(annotated_path).name)
-                if report_path.exists():
-                    archive.write(report_path, arcname=report_path.name)
-                if pdf_path and Path(pdf_path).exists():
-                    archive.write(pdf_path, arcname=Path(pdf_path).name)
-
-            # Remove temporary Rust parse JSON if present
-            try:
-                temp_path = None
-                if isinstance(parse_result, dict):
-                    temp_path = parse_result.get("temp_output_path")
-                if temp_path:
-                    t = Path(str(temp_path))
-                    if t.exists():
-                        t.unlink()
-            except Exception:
-                pass
-
             await tq.update_task(
                 task_id,
                 status="done",
                 progress=100,
-                result_path=str(zip_path),
+                result_path=str(report_path),
                 current_stage="completed",
                 error_message=None,
                 checkpoint_data=json.dumps(checkpoint, ensure_ascii=False),
