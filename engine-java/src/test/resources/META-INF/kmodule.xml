@@ -1,0 +1,17 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<kmodule xmlns="http://www.drools.org/xsd/kmodule">
+    <!-- 排版规则库 -->
+    <kbase name="formattingRules" packages="rules.formatting">
+        <ksession name="formattingSession" />
+    </kbase>
+
+    <!-- 引用检查规则库 -->
+    <kbase name="referenceRules" packages="rules.reference">
+        <ksession name="referenceSession" />
+    </kbase>
+
+    <!-- 完整性规则库 -->
+    <kbase name="integrityRules" packages="rules.integrity">
+        <ksession name="integritySession" />
+    </kbase>
+</kmodule>

@@ -2,15 +2,18 @@ from __future__ import annotations
 
 import asyncio
 import os
+import logging
 from typing import Any, Dict, List, TypedDict
 
 from ...config import settings
 from ..llm import build_qwen_client, normalize_focus_areas
 from ..rules import (
+    audit_document_via_java_http,
     check_consistency_rules,
     check_table_rules,
     check_text_rules,
     detect_reference_entries,
+    normalize_java_audit_response,
 )
 from ..rules.common import is_code_like_text
 from ..vector import (
@@ -19,6 +22,9 @@ from ..vector import (
     resolve_reference_verifier_backend,
     verify_reference_locally,
 )
+
+
+logger = logging.getLogger(__name__)
 
 
 class AuditState(TypedDict, total=False):
@@ -119,6 +125,11 @@ def _fast_local_only() -> bool:
     return os.environ.get("PAPER_AUDIT_FAST_LOCAL_ONLY", "0").strip() == "1"
 
 
+def _rules_backend() -> str:
+    backend = str(getattr(settings, "RULE_AUDIT_BACKEND", "java_http")).strip().lower()
+    return backend or "java_http"
+
+
 def _issue_span(issue: Dict[str, Any]) -> tuple[int | None, int | None]:
     position = issue.get("position") if isinstance(issue, dict) else None
     if isinstance(position, dict):
@@ -201,6 +212,173 @@ def _dedupe_issues(issues: List[Dict[str, Any]]) -> List[Dict[str, Any]]:
         seen.add(signature)
         deduped.append(issue)
     return deduped
+
+
+def _section_key(value: Any) -> str:
+    return "" if value is None else str(value)
+
+
+def _build_java_section_reviews(
+    parsed_data: Dict[str, Any], issues: List[Dict[str, Any]]
+) -> List[Dict[str, Any]]:
+    sections = parsed_data.get("sections", []) if isinstance(parsed_data, dict) else []
+    issues_by_section: Dict[str, List[Dict[str, Any]]] = {}
+    unassigned_issues: List[Dict[str, Any]] = []
+
+    for issue in issues:
+        if not isinstance(issue, dict):
+            continue
+        position = issue.get("position") if isinstance(issue.get("position"), dict) else {}
+        section_id = issue.get("section_id")
+        if section_id is None and isinstance(position, dict):
+            section_id = position.get("section_id")
+        key = _section_key(section_id)
+        if key:
+            issues_by_section.setdefault(key, []).append(issue)
+        else:
+            unassigned_issues.append(issue)
+
+    section_reviews: List[Dict[str, Any]] = []
+    for index, section in enumerate(sections, start=1):
+        if not isinstance(section, dict):
+            continue
+        section_id = section.get("id") or section.get("section_id") or index
+        key = _section_key(section_id)
+        section_issues = issues_by_section.pop(key, [])
+        section_reviews.append(
+            {
+                "section_id": section_id,
+                "kind": "table" if bool(section.get("is_table")) else "section",
+                "text": section.get("raw_text") or section.get("text"),
+                "is_table": bool(section.get("is_table")),
+                "issues": section_issues,
+                "issue_count": len(section_issues),
+                "backend": "java_http",
+                "java_issues": section_issues,
+            }
+        )
+
+    for key, section_issues in issues_by_section.items():
+        section_reviews.append(
+            {
+                "section_id": key,
+                "kind": "document",
+                "text": "",
+                "is_table": False,
+                "issues": section_issues,
+                "issue_count": len(section_issues),
+                "backend": "java_http",
+                "java_issues": section_issues,
+            }
+        )
+
+    if unassigned_issues:
+        section_reviews.append(
+            {
+                "section_id": None,
+                "kind": "document",
+                "text": "",
+                "is_table": False,
+                "issues": unassigned_issues,
+                "issue_count": len(unassigned_issues),
+                "backend": "java_http",
+                "java_issues": unassigned_issues,
+            }
+        )
+
+    return section_reviews
+
+
+async def _review_document_java_http(
+    parsed_data: Dict[str, Any], source_file: str | None = None
+) -> Dict[str, Any]:
+    chunks = split_into_chunks(parsed_data)
+    java_response = await audit_document_via_java_http(
+        parsed_data,
+        source_file=source_file,
+    )
+    normalized_java = normalize_java_audit_response(java_response)
+    section_reviews = _build_java_section_reviews(parsed_data, normalized_java["issues"])
+
+    return {
+        "backend": "java_http",
+        "java_review": normalized_java["raw"],
+        "chunks": chunks,
+        "chunk_reviews": section_reviews,
+        "section_reviews": section_reviews,
+        "reference_verification": [],
+        "consistency_issues": [],
+        "summary": {
+            "chunk_count": len(chunks),
+            "section_count": len(section_reviews),
+            "reference_count": len(detect_reference_entries(parsed_data)),
+            "chunk_issue_count": len(normalized_java["issues"]),
+            "consistency_issue_count": 0,
+            "java_issue_count": len(normalized_java["issues"]),
+            "java_score_impact": normalized_java.get("score_impact", 0),
+        },
+    }
+
+
+async def _review_document_local(
+    parsed_data: Dict[str, Any], source_file: str | None = None
+) -> Dict[str, Any]:
+    focus_areas = normalize_focus_areas(None)
+    chunks = split_into_chunks(parsed_data)
+    section_reviews: List[Dict[str, Any]] = []
+    fast_local_only = _fast_local_only()
+    client: Any = None
+
+    def ensure_client() -> Any:
+        nonlocal client
+        if client is None:
+            client = build_qwen_client()
+        return client
+
+    worker_count = max(1, int(getattr(settings, "LLM_QWEN_BATCH_SIZE", 4)))
+    semaphore = asyncio.Semaphore(worker_count)
+
+    section_groups = _group_chunks_by_section_id(chunks)
+
+    async def review_section_group(group: Dict[str, Any]) -> Dict[str, Any]:
+        group_chunks = group.get("chunks", [])
+        if group_chunks and all(
+            bool(chunk.get("is_code_block")) for chunk in group_chunks
+        ):
+            return _skipped_chunk_review(group_chunks[0], "code_block")
+        async with semaphore:
+            section_client = ensure_client()
+            return await _review_section_group_worker(
+                section_client, group, focus_areas, fast_local_only
+            )
+
+    section_reviews = await asyncio.gather(
+        *[review_section_group(group) for group in section_groups]
+    )
+
+    references = detect_reference_entries(parsed_data)
+    reference_verification = await verify_references(references)
+    consistency_issues = check_consistency_rules(parsed_data, source_file=source_file)
+
+    return {
+        "backend": "qwen",
+        "chunks": chunks,
+        "chunk_reviews": section_reviews,
+        "section_reviews": section_reviews,
+        "reference_verification": reference_verification,
+        "consistency_issues": consistency_issues,
+        "summary": {
+            "chunk_count": len(chunks),
+            "section_count": len(section_groups),
+            "reference_count": len(references),
+            "chunk_issue_count": sum(
+                item.get("issue_count", 0) for item in section_reviews
+            ),
+            "consistency_issue_count": len(consistency_issues),
+            "qwen_worker_count": worker_count,
+            "qwen_batch_size": worker_count,
+        },
+    }
 
 
 def _skipped_chunk_review(chunk: Dict[str, Any], reason: str) -> Dict[str, Any]:
@@ -442,9 +620,7 @@ async def _review_section_group_worker(
             field_summary: Dict[str, Any] = {}
             critical_gaps: List[str] = []
         else:
-            table_result = await _review_table_with_qwen(
-                client, table_rows, focus_areas
-            )
+            table_result = await _review_table_with_qwen(client, table_rows, focus_areas)
             llm_table_issues = table_result.get("table_issues", [])
             table_backend = table_result.get("backend", "qwen")
             field_summary = table_result.get("field_summary", {})
@@ -652,62 +828,20 @@ async def verify_references(references: List[Dict[str, Any]]) -> List[Dict[str, 
 async def review_document(
     parsed_data: Dict[str, Any], source_file: str | None = None
 ) -> Dict[str, Any]:
-    focus_areas = normalize_focus_areas(None)
-    chunks = split_into_chunks(parsed_data)
-    section_reviews: List[Dict[str, Any]] = []
-    fast_local_only = _fast_local_only()
-    client: Any = None
+    backend = _rules_backend()
+    if backend in {"java_http", "java", "http", "hybrid"}:
+        try:
+            return await _review_document_java_http(parsed_data, source_file=source_file)
+        except Exception as exc:
+            logger.warning("Java HTTP audit failed, falling back to local rules: %s", exc)
+            if backend == "hybrid":
+                local_review = await _review_document_local(parsed_data, source_file=source_file)
+                local_review["backend"] = "hybrid"
+                local_review["java_error"] = str(exc)
+                return local_review
+            return await _review_document_local(parsed_data, source_file=source_file)
 
-    def ensure_client() -> Any:
-        nonlocal client
-        if client is None:
-            client = build_qwen_client()
-        return client
-
-    worker_count = max(1, int(getattr(settings, "LLM_QWEN_BATCH_SIZE", 4)))
-    semaphore = asyncio.Semaphore(worker_count)
-
-    section_groups = _group_chunks_by_section_id(chunks)
-
-    async def review_section_group(group: Dict[str, Any]) -> Dict[str, Any]:
-        group_chunks = group.get("chunks", [])
-        if group_chunks and all(
-            bool(chunk.get("is_code_block")) for chunk in group_chunks
-        ):
-            return _skipped_chunk_review(group_chunks[0], "code_block")
-        async with semaphore:
-            section_client = ensure_client()
-            return await _review_section_group_worker(
-                section_client, group, focus_areas, fast_local_only
-            )
-
-    section_reviews = await asyncio.gather(
-        *[review_section_group(group) for group in section_groups]
-    )
-
-    references = detect_reference_entries(parsed_data)
-    reference_verification = await verify_references(references)
-    consistency_issues = check_consistency_rules(parsed_data, source_file=source_file)
-
-    return {
-        "backend": "qwen",
-        "chunks": chunks,
-        "chunk_reviews": section_reviews,
-        "section_reviews": section_reviews,
-        "reference_verification": reference_verification,
-        "consistency_issues": consistency_issues,
-        "summary": {
-            "chunk_count": len(chunks),
-            "section_count": len(section_groups),
-            "reference_count": len(references),
-            "chunk_issue_count": sum(
-                item.get("issue_count", 0) for item in section_reviews
-            ),
-            "consistency_issue_count": len(consistency_issues),
-            "qwen_worker_count": worker_count,
-            "qwen_batch_size": worker_count,
-        },
-    }
+    return await _review_document_local(parsed_data, source_file=source_file)
 
 
 def build_workflow():

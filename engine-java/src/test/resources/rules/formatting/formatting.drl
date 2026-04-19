@@ -1,0 +1,262 @@
+package rules.formatting
+import com.auditor.grpc.Issue
+import com.auditor.grpc.Severity
+import com.auditor.grpc.Section
+import com.auditor.grpc.ParsedData
+import org.slf4j.Logger
+import java.util.*
+
+global java.util.List results
+global Logger logger
+
+// Helper function: create Issue (consistent with main DRL)
+function Issue createFormatIssue(String code, String message, int sectionId, Severity severity, String suggestion) {
+    return Issue.newBuilder()
+        .setCode(code)
+        .setMessage(message)
+        .setSectionId(sectionId)
+        .setSeverity(severity)
+        .setSuggestion(suggestion)
+        .setOriginalSnippet("")
+        .build();
+}
+
+// Rule 1: Check Level 1 Heading Font (read font-family from props map)
+rule "Check Level 1 Heading Font"
+when
+    $section: Section(level == 1, type == "heading")
+then
+    String fontFamily = (String)$section.getPropsMap().get("font-family");
+    if (fontFamily != null && !fontFamily.isEmpty() && !"黑体".equals(fontFamily) && !"SimHei".equals(fontFamily)) {
+        logger.info("Found Level 1 heading font issue: sectionId={}, current font={}", $section.getSectionId(), fontFamily);
+        results.add(createFormatIssue(
+            "FMT_HEADING_FONT",
+            "Level 1 heading (paragraph " + $section.getSectionId() + ") font should be SimHei, current is " + fontFamily,
+            $section.getSectionId(),
+            Severity.MEDIUM,
+            "Please change the Level 1 heading font to SimHei"
+        ));
+    }
+end
+
+// Rule 2: Check Level 2 Heading Font
+rule "Check Level 2 Heading Font"
+when
+    $section: Section(level == 2, type == "heading")
+then
+    String fontFamily = (String)$section.getPropsMap().get("font-family");
+    if (fontFamily != null && !fontFamily.isEmpty() && !"黑体".equals(fontFamily) && !"SimHei".equals(fontFamily)) {
+        logger.info("Found Level 2 heading font issue: sectionId={}, current font={}", $section.getSectionId(), fontFamily);
+        results.add(createFormatIssue(
+            "FMT_HEADING_FONT",
+            "Level 2 heading (paragraph " + $section.getSectionId() + ") font should be SimHei, current is " + fontFamily,
+            $section.getSectionId(),
+            Severity.MEDIUM,
+            "Please change the Level 2 heading font to SimHei"
+        ));
+    }
+end
+
+// Rule 3: Check Body Font
+rule "Check Body Font"
+when
+    $section: Section(level == 0, type == "paragraph")
+then
+    String fontFamily = (String)$section.getPropsMap().get("font-family");
+    if (fontFamily != null && !fontFamily.isEmpty() && !"宋体".equals(fontFamily) && !"SimSun".equals(fontFamily)) {
+        logger.info("Found body font issue: sectionId={}, current font={}", $section.getSectionId(), fontFamily);
+        results.add(createFormatIssue(
+            "FMT_BODY_FONT",
+            "Body text (paragraph " + $section.getSectionId() + ") font should be SimSun, current is " + fontFamily,
+            $section.getSectionId(),
+            Severity.MEDIUM,
+            "Please change the body font to SimSun"
+        ));
+    }
+end
+
+// Rule 4: Check Level 1 Heading Font Size (read font-size from props map, format like "14pt")
+rule "Check Level 1 Heading Font Size"
+when
+    $section: Section(level == 1, type == "heading")
+then
+    String fontSizeStr = (String)$section.getPropsMap().get("font-size");
+    if (fontSizeStr != null && !fontSizeStr.isEmpty()) {
+        try {
+            double fontSize = Double.parseDouble(fontSizeStr.replaceAll("[^0-9.]", ""));
+            if (fontSize < 16 || fontSize > 18) {
+                logger.info("Found Level 1 heading font size issue: sectionId={}, current size={}", $section.getSectionId(), fontSize);
+                results.add(createFormatIssue(
+                    "FMT_HEADING_SIZE",
+                    "Level 1 heading (paragraph " + $section.getSectionId() + ") font size should be 16-18pt, current is " + fontSize + "pt",
+                    $section.getSectionId(),
+                    Severity.MEDIUM,
+                    "Please adjust the Level 1 heading font size to 16-18pt"
+                ));
+            }
+        } catch (NumberFormatException e) {
+            logger.warn("Unable to parse Level 1 heading font size: {}", fontSizeStr);
+        }
+    }
+end
+
+// Rule 5: Check Level 2 Heading Font Size
+rule "Check Level 2 Heading Font Size"
+when
+    $section: Section(level == 2, type == "heading")
+then
+    String fontSizeStr = (String)$section.getPropsMap().get("font-size");
+    if (fontSizeStr != null && !fontSizeStr.isEmpty()) {
+        try {
+            double fontSize = Double.parseDouble(fontSizeStr.replaceAll("[^0-9.]", ""));
+            if (fontSize < 15 || fontSize > 16) {
+                logger.info("Found Level 2 heading font size issue: sectionId={}, current size={}", $section.getSectionId(), fontSize);
+                results.add(createFormatIssue(
+                    "FMT_HEADING_SIZE",
+                    "Level 2 heading (paragraph " + $section.getSectionId() + ") font size should be 15-16pt, current is " + fontSize + "pt",
+                    $section.getSectionId(),
+                    Severity.MEDIUM,
+                    "Please adjust the Level 2 heading font size to 15-16pt"
+                ));
+            }
+        } catch (NumberFormatException e) {
+            logger.warn("Unable to parse Level 2 heading font size: {}", fontSizeStr);
+        }
+    }
+end
+
+// Rule 6: Check Body Font Size
+rule "Check Body Font Size"
+when
+    $section: Section(level == 0, type == "paragraph")
+then
+    String fontSizeStr = (String)$section.getPropsMap().get("font-size");
+    if (fontSizeStr != null && !fontSizeStr.isEmpty()) {
+        try {
+            double fontSize = Double.parseDouble(fontSizeStr.replaceAll("[^0-9.]", ""));
+            if (fontSize < 12 || fontSize > 13) {
+                logger.info("Found body font size issue: sectionId={}, current size={}", $section.getSectionId(), fontSize);
+                results.add(createFormatIssue(
+                    "FMT_BODY_SIZE",
+                    "Body text (paragraph " + $section.getSectionId() + ") font size should be 12-13pt, current is " + fontSize + "pt",
+                    $section.getSectionId(),
+                    Severity.MEDIUM,
+                    "Please adjust the body font size to 12-13pt"
+                ));
+            }
+        } catch (NumberFormatException e) {
+            logger.warn("Unable to parse body font size: {}", fontSizeStr);
+        }
+    }
+end
+
+// Rule 7: Check Line Spacing (read line-height from props map)
+// Academic paper line spacing requirement: 1.5~2.0 times, too small (<1.5) or too large (>2.0) is non-compliant
+rule "Check Line Spacing"
+when
+    $section: Section(type == "paragraph" || type == "heading")
+then
+    String lineSpacingStr = (String)$section.getPropsMap().get("line-height");
+    if (lineSpacingStr != null && !lineSpacingStr.isEmpty()) {
+        try {
+            double lineSpacing = Double.parseDouble(lineSpacingStr);
+            if (lineSpacing < 1.5) {
+                logger.info("Found line spacing too small issue: sectionId={}, current spacing={}", $section.getSectionId(), lineSpacing);
+                results.add(createFormatIssue(
+                    "FMT_LINE_SPACING_TOO_SMALL",
+                    "Paragraph " + $section.getSectionId() + " line spacing is too small (should be 1.5~2.0 times), current is " + lineSpacing + " times",
+                    $section.getSectionId(),
+                    Severity.LOW,
+                    "Please adjust the line spacing to 1.5~2.0 times"
+                ));
+            } else if (lineSpacing > 2.0) {
+                logger.info("Found line spacing too large issue: sectionId={}, current spacing={}", $section.getSectionId(), lineSpacing);
+                results.add(createFormatIssue(
+                    "FMT_LINE_SPACING_TOO_LARGE",
+                    "Paragraph " + $section.getSectionId() + " line spacing is too large (should be 1.5~2.0 times), current is " + lineSpacing + " times",
+                    $section.getSectionId(),
+                    Severity.LOW,
+                    "Please adjust the line spacing to 1.5~2.0 times"
+                ));
+            }
+        } catch (NumberFormatException e) {
+            logger.warn("Unable to parse line spacing: {}", lineSpacingStr);
+        }
+    }
+end
+
+// Rule 8: Check Text Alignment (read alignment from props map)
+rule "Check Text Alignment"
+when
+    $section: Section(type == "paragraph")
+then
+    String textAlignment = (String)$section.getPropsMap().get("alignment");
+    if (textAlignment != null && !textAlignment.isEmpty()
+            && !"justify".equalsIgnoreCase(textAlignment) && !"left".equalsIgnoreCase(textAlignment)) {
+        logger.info("Found text alignment issue: sectionId={}, current alignment={}", $section.getSectionId(), textAlignment);
+        results.add(createFormatIssue(
+            "FMT_TEXT_ALIGNMENT",
+            "Paragraph " + $section.getSectionId() + " alignment should be justified or left, current is " + textAlignment,
+            $section.getSectionId(),
+            Severity.LOW,
+            "Please change the alignment to justified or left"
+        ));
+    }
+end
+
+// Rule 9: Check Table Page Break Continuation Flag
+rule "Check Table Page Break"
+when
+    $section: Section(type == "table")
+then
+    String pageBreak = (String)$section.getPropsMap().get("page-break");
+    String continueFlag = (String)$section.getPropsMap().get("continue-table-flag");
+    if ("true".equals(pageBreak) && !"true".equals(continueFlag)) {
+        results.add(createFormatIssue(
+            "FMT_TABLE_PAGE_BREAK",
+            "Section " + $section.getSectionId() + " table breaks across pages but 'continue table' flag is not set",
+            $section.getSectionId(),
+            Severity.MEDIUM,
+            "Please add 'continue table' flag on subsequent pages of the broken table"
+        ));
+    }
+end
+
+// Rule 10: Check Formula Alignment
+rule "Check Formula Alignment"
+when
+    $section: Section(type == "formula")
+then
+    String alignment = (String)$section.getPropsMap().get("alignment");
+    if (alignment != null && !alignment.isEmpty()
+            && !"right".equalsIgnoreCase(alignment)) {
+        results.add(createFormatIssue(
+            "FMT_FORMULA_ALIGNMENT",
+            "Section " + $section.getSectionId() + " formula is not right-aligned, current alignment: " + alignment,
+            $section.getSectionId(),
+            Severity.MEDIUM,
+            "Please set formula alignment to right"
+        ));
+    }
+end
+
+// Rule 11: Check Heading Level Jump (no direct jump from level 1 to level 3 heading)
+rule "Check Heading Level Jump"
+when
+    $h1: Section(type == "heading", level == 1)
+    $h3: Section(type == "heading", level == 3,
+                 sectionId > $h1.sectionId)
+    not Section(type == "heading", level == 2,
+                sectionId > $h1.sectionId,
+                sectionId < $h3.sectionId)
+then
+    logger.info("Found heading level jump: direct jump from level 1 heading(sectionId={}) to level 3 heading(sectionId={})",
+        $h1.getSectionId(), $h3.getSectionId());
+    results.add(createFormatIssue(
+        "FMT_HEADING_LEVEL_JUMP",
+        "Heading level jump: after level 1 heading (paragraph " + $h1.getSectionId() + ") directly appears level 3 heading (paragraph " + $h3.getSectionId() + "), missing level 2 heading",
+        $h3.getSectionId(),
+        Severity.MEDIUM,
+        "Please add a level 2 heading between level 1 and level 3 headings to maintain level continuity"
+    ));
+end

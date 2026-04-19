@@ -1,0 +1,492 @@
+package rules.formatting
+
+import com.auditor.grpc.Issue
+import com.auditor.grpc.Severity
+import com.auditor.grpc.Section
+import com.auditor.grpc.ParsedData
+import org.slf4j.Logger
+import java.util.*
+
+global java.util.List results
+global Logger logger
+
+// ==================== Helper Functions ====================
+
+function Issue createFormatIssue(String code, String message, int sectionId, Severity severity, String suggestion) {
+    return Issue.newBuilder()
+        .setCode(code)
+        .setMessage(message)
+        .setSectionId(sectionId)
+        .setSeverity(severity)
+        .setSuggestion(suggestion)
+        .setOriginalSnippet("")
+        .build();
+}
+
+// ==================== Rule Definitions ====================
+
+// Rule 1: Precise Line Spacing Check (1.5 ± 0.05)
+rule "Precise Line Spacing Check"
+when
+    $section: Section(type == "paragraph" || type == "heading")
+then
+    String lineHeightStr = (String)$section.getPropsMap().get("line-height");
+    if (lineHeightStr != null && !lineHeightStr.isEmpty()) {
+        try {
+            double lineHeight = Double.parseDouble(lineHeightStr);
+            
+            if (Math.abs(lineHeight - 1.5) > 0.05) {
+                results.add(createFormatIssue(
+                    "FMT_LINE_HEIGHT_001",
+                    "Section " + $section.getSectionId() + " line spacing does not meet the standard: " + lineHeight + ", should be 1.5 (tolerance ±0.05)",
+                    (int)$section.getSectionId(),
+                    Severity.MEDIUM,
+                    "Please adjust the line spacing to 1.5 times"
+                ));
+            }
+        } catch (NumberFormatException e) {
+            logger.warn("Unable to parse line spacing value: {}", lineHeightStr);
+        }
+    }
+end
+
+// Rule 2: Hierarchy Check - Heading Sequence Verification
+rule "Heading Sequence Hierarchy Check"
+when
+    $data: ParsedData()
+then
+    List<Section> sections = new ArrayList<>($data.getSectionsList());
+    
+    for (int i = 0; i < sections.size() - 1; i++) {
+        Section current = sections.get(i);
+        Section next = sections.get(i + 1);
+        
+        if ("heading".equals(current.getType()) && "heading".equals(next.getType())) {
+            int currentLevel = current.getLevel();
+            int nextLevel = next.getLevel();
+            
+            // Check if hierarchy is reasonable (no skipping levels)
+            if (nextLevel > currentLevel + 1) {
+                results.add(createFormatIssue(
+                    "FMT_HEADING_LEVEL_JUMP",
+                    "Section " + next.getSectionId() + " heading level jump: from level " + currentLevel + " to level " + nextLevel,
+                    (int)next.getSectionId(),
+                    Severity.HIGH,
+                    "Please use heading levels in order"
+                ));
+            }
+            
+            // Check for reverse order (e.g., level 2 followed directly by level 1, unless it's a new chapter)
+            if (nextLevel < currentLevel && nextLevel != 1) {
+                results.add(createFormatIssue(
+                    "FMT_HEADING_LEVEL_REVERSE",
+                    "Section " + next.getSectionId() + " heading level reverse order: from level " + currentLevel + " down to level " + nextLevel,
+                    (int)next.getSectionId(),
+                    Severity.MEDIUM,
+                    "Please check the heading level order"
+                ));
+            }
+        }
+    }
+end
+
+// Rule 3: Table Page Break Check
+rule "Table Page Break Check"
+when
+    $section: Section(type == "table")
+then
+    String pageBreak = (String)$section.getPropsMap().get("page-break");
+    String continueTableFlag = (String)$section.getPropsMap().get("continue-table-flag");
+    
+    if ("true".equals(pageBreak)) {
+        if (!"true".equals(continueTableFlag)) {
+            results.add(createFormatIssue(
+                "FMT_TABLE_PAGE_BREAK",
+                "Section " + $section.getSectionId() + " table breaks across pages but 'continue table' flag is not set",
+                (int)$section.getSectionId(),
+                Severity.MEDIUM,
+                "Please set the 'continue table' flag or adjust the table position"
+            ));
+        }
+    }
+end
+
+// Rule 4: Formula Alignment Check
+rule "Formula Alignment Check"
+when
+    $section: Section(type == "formula")
+then
+    String alignment = (String)$section.getPropsMap().get("alignment");
+    
+    if (alignment == null || !alignment.equals("right")) {
+        results.add(createFormatIssue(
+            "FMT_FORMULA_ALIGNMENT",
+            "Section " + $section.getSectionId() + " formula is not right-aligned, current alignment: " + (alignment == null ? "not set" : alignment),
+            (int)$section.getSectionId(),
+            Severity.MEDIUM,
+            "Please set the formula alignment to right"
+        ));
+    }
+end
+
+// Rule 5: Level 1 Heading Font Check
+rule "Level 1 Heading Font Check"
+when
+    $section: Section(level == 1, type == "heading")
+then
+    String fontFamily = (String)$section.getPropsMap().get("font-family");
+    if (fontFamily == null || !fontFamily.contains("黑体")) {
+        results.add(createFormatIssue(
+            "FMT_HEADING_FONT_001",
+            "Section " + $section.getSectionId() + " level 1 heading must use Heiti font",
+            (int)$section.getSectionId(),
+            Severity.MEDIUM,
+            "Please change the level 1 heading font to Heiti"
+        ));
+    }
+end
+
+// Rule 6: Level 1 Heading Font Size Check (should be 18pt)
+rule "Level 1 Heading Font Size Check"
+when
+    $section: Section(level == 1, type == "heading")
+then
+    String fontSize = (String)$section.getPropsMap().get("font-size");
+    if (fontSize != null && !fontSize.isEmpty()) {
+        try {
+            double size = Double.parseDouble(fontSize.replaceAll("[^0-9.]", ""));
+            if (Math.abs(size - 18) > 1) {
+                results.add(createFormatIssue(
+                    "FMT_HEADING_SIZE_001",
+                    "Section " + $section.getSectionId() + " level 1 heading font size should be 18pt, current is " + size + "pt",
+                    (int)$section.getSectionId(),
+                    Severity.MEDIUM,
+                    "Please change the level 1 heading font size to 18pt"
+                ));
+            }
+        } catch (NumberFormatException e) {
+            logger.warn("Unable to parse font size: {}", fontSize);
+        }
+    }
+end
+
+// Rule 7: Level 2 Heading Font Check
+rule "Level 2 Heading Font Check"
+when
+    $section: Section(level == 2, type == "heading")
+then
+    String fontFamily = (String)$section.getPropsMap().get("font-family");
+    if (fontFamily == null || !fontFamily.contains("黑体")) {
+        results.add(createFormatIssue(
+            "FMT_HEADING_FONT_002",
+            "Section " + $section.getSectionId() + " level 2 heading must use Heiti font",
+            (int)$section.getSectionId(),
+            Severity.MEDIUM,
+            "Please change the level 2 heading font to Heiti"
+        ));
+    }
+end
+
+// Rule 8: Level 2 Heading Font Size Check (should be 16pt)
+rule "Level 2 Heading Font Size Check"
+when
+    $section: Section(level == 2, type == "heading")
+then
+    String fontSize = (String)$section.getPropsMap().get("font-size");
+    if (fontSize != null && !fontSize.isEmpty()) {
+        try {
+            double size = Double.parseDouble(fontSize.replaceAll("[^0-9.]", ""));
+            if (Math.abs(size - 16) > 1) {
+                results.add(createFormatIssue(
+                    "FMT_HEADING_SIZE_002",
+                    "Section " + $section.getSectionId() + " level 2 heading font size should be 16pt, current is " + size + "pt",
+                    (int)$section.getSectionId(),
+                    Severity.MEDIUM,
+                    "Please change the level 2 heading font size to 16pt"
+                ));
+            }
+        } catch (NumberFormatException e) {
+            logger.warn("Unable to parse font size: {}", fontSize);
+        }
+    }
+end
+
+// Rule 9: Level 3 Heading Font Check
+rule "Level 3 Heading Font Check"
+when
+    $section: Section(level == 3, type == "heading")
+then
+    String fontFamily = (String)$section.getPropsMap().get("font-family");
+    if (fontFamily == null || !fontFamily.contains("黑体")) {
+        results.add(createFormatIssue(
+            "FMT_HEADING_FONT_003",
+            "Section " + $section.getSectionId() + " level 3 heading must use Heiti font",
+            (int)$section.getSectionId(),
+            Severity.MEDIUM,
+            "Please change the level 3 heading font to Heiti"
+        ));
+    }
+end
+
+// Rule 10: Level 3 Heading Font Size Check (should be 14pt)
+rule "Level 3 Heading Font Size Check"
+when
+    $section: Section(level == 3, type == "heading")
+then
+    String fontSize = (String)$section.getPropsMap().get("font-size");
+    if (fontSize != null && !fontSize.isEmpty()) {
+        try {
+            double size = Double.parseDouble(fontSize.replaceAll("[^0-9.]", ""));
+            if (Math.abs(size - 14) > 1) {
+                results.add(createFormatIssue(
+                    "FMT_HEADING_SIZE_003",
+                    "Section " + $section.getSectionId() + " level 3 heading font size should be 14pt, current is " + size + "pt",
+                    (int)$section.getSectionId(),
+                    Severity.MEDIUM,
+                    "Please change the level 3 heading font size to 14pt"
+                ));
+            }
+        } catch (NumberFormatException e) {
+            logger.warn("Unable to parse font size: {}", fontSize);
+        }
+    }
+end
+
+// Rule 11: Body Text Font Check
+rule "Body Text Font Check"
+when
+    $section: Section(type == "paragraph")
+then
+    String fontFamily = (String)$section.getPropsMap().get("font-family");
+    if (fontFamily == null || (!fontFamily.contains("宋体") && !fontFamily.contains("仿宋"))) {
+        results.add(createFormatIssue(
+            "FMT_BODY_FONT_001",
+            "Section " + $section.getSectionId() + " body text must use SimSun or FangSong font",
+            (int)$section.getSectionId(),
+            Severity.MEDIUM,
+            "Please change the body text font to SimSun or FangSong"
+        ));
+    }
+end
+
+// Rule 12: Body Text Font Size Check (should be 12pt)
+rule "Body Text Font Size Check"
+when
+    $section: Section(type == "paragraph")
+then
+    String fontSize = (String)$section.getPropsMap().get("font-size");
+    if (fontSize != null && !fontSize.isEmpty()) {
+        try {
+            double size = Double.parseDouble(fontSize.replaceAll("[^0-9.]", ""));
+            if (Math.abs(size - 12) > 1) {
+                results.add(createFormatIssue(
+                    "FMT_BODY_SIZE_001",
+                    "Section " + $section.getSectionId() + " body text font size should be 12pt, current is " + size + "pt",
+                    (int)$section.getSectionId(),
+                    Severity.MEDIUM,
+                    "Please change the body text font size to 12pt"
+                ));
+            }
+        } catch (NumberFormatException e) {
+            logger.warn("Unable to parse font size: {}", fontSize);
+        }
+    }
+end
+
+// Rule 13: Paragraph Indentation Check (should be 2 characters)
+rule "Paragraph Indentation Check"
+when
+    $section: Section(type == "paragraph")
+then
+    String indent = (String)$section.getPropsMap().get("indent");
+    if (indent != null && !indent.isEmpty()) {
+        try {
+            double indentValue = Double.parseDouble(indent.replaceAll("[^0-9.]", ""));
+            if (indentValue < 0.4 || indentValue > 0.6) {
+                results.add(createFormatIssue(
+                    "FMT_INDENT_001",
+                    "Section " + $section.getSectionId() + " paragraph indentation does not meet the standard, should be 2 characters",
+                    (int)$section.getSectionId(),
+                    Severity.LOW,
+                    "Please adjust the paragraph indentation to 2 characters"
+                ));
+            }
+        } catch (NumberFormatException e) {
+            logger.warn("Unable to parse indentation value: {}", indent);
+        }
+    }
+end
+
+// Rule 14: Page Number Position Check (should be centered)
+rule "Page Number Position Check"
+when
+    $section: Section(type == "page-number")
+then
+    String alignment = (String)$section.getPropsMap().get("alignment");
+    
+    if (alignment == null || !alignment.equals("center")) {
+        results.add(createFormatIssue(
+            "FMT_PAGE_NUMBER_001",
+            "Section " + $section.getSectionId() + " page number is not centered, current alignment: " + (alignment == null ? "not set" : alignment),
+            (int)$section.getSectionId(),
+            Severity.MEDIUM,
+            "Please set the page number alignment to center"
+        ));
+    }
+end
+
+// Rule 15: Empty Line Audit (check for redundant empty lines)
+rule "Empty Line Audit"
+when
+    $section: Section(type == "paragraph")
+then
+    String text = $section.getText();
+    if (text != null && text.trim().isEmpty()) {
+        results.add(createFormatIssue(
+            "FMT_EMPTY_LINE_001",
+            "Section " + $section.getSectionId() + " is a redundant empty line",
+            (int)$section.getSectionId(),
+            Severity.LOW,
+            "Please delete redundant empty lines"
+        ));
+    }
+end
+
+// Rule 16: Table Caption Check
+rule "Table Caption Check"
+when
+    $section: Section(type == "table")
+then
+    String caption = (String)$section.getPropsMap().get("caption");
+    if (caption == null || caption.isEmpty()) {
+        results.add(createFormatIssue(
+            "FMT_TABLE_CAPTION",
+            "Section " + $section.getSectionId() + " table is missing a caption",
+            (int)$section.getSectionId(),
+            Severity.MEDIUM,
+            "Please add a caption to the table"
+        ));
+    }
+end
+
+// Rule 17: Image Caption Check
+rule "Image Caption Check"
+when
+    $section: Section(type == "image")
+then
+    String caption = (String)$section.getPropsMap().get("caption");
+    if (caption == null || caption.isEmpty()) {
+        results.add(createFormatIssue(
+            "FMT_IMAGE_CAPTION",
+            "Section " + $section.getSectionId() + " image is missing a caption",
+            (int)$section.getSectionId(),
+            Severity.MEDIUM,
+            "Please add a caption to the image"
+        ));
+    }
+end
+
+// Rule 18: Page Margin Check (2.5cm on all sides)
+rule "Page Margin Check"
+when
+    $section: Section()
+then
+    String marginTop = (String)$section.getPropsMap().get("margin-top");
+    String marginLeft = (String)$section.getPropsMap().get("margin-left");
+    
+    if ($section.getSectionId() == 1) {
+        boolean marginError = false;
+        
+        try {
+            if (marginTop != null && !marginTop.isEmpty()) {
+                double top = Double.parseDouble(marginTop.replaceAll("[^0-9.]", ""));
+                if (Math.abs(top - 2.5) > 0.3) {
+                    marginError = true;
+                }
+            }
+            
+            if (marginLeft != null && !marginLeft.isEmpty()) {
+                double left = Double.parseDouble(marginLeft.replaceAll("[^0-9.]", ""));
+                if (Math.abs(left - 2.5) > 0.3) {
+                    marginError = true;
+                }
+            }
+        } catch (NumberFormatException e) {
+            logger.warn("Unable to parse page margins");
+        }
+        
+        if (marginError) {
+            results.add(createFormatIssue(
+                "FMT_MARGIN_001",
+                "Page margins do not meet the standard, should be 2.5cm on all sides",
+                1,
+                Severity.MEDIUM,
+                "Please adjust the page margins to 2.5cm on all sides"
+            ));
+        }
+    }
+end
+
+// Rule 19: Spacing Between Heading and Body Text Check
+rule "Spacing Between Heading and Body Text Check"
+when
+    $data: ParsedData()
+then
+    List<Section> sections = new ArrayList<>($data.getSectionsList());
+    
+    for (int i = 0; i < sections.size() - 1; i++) {
+        Section current = sections.get(i);
+        Section next = sections.get(i + 1);
+        
+        if ("heading".equals(current.getType()) && "paragraph".equals(next.getType())) {
+            String spacing = (String)next.getPropsMap().get("spacing-before");
+            if (spacing != null && !spacing.isEmpty()) {
+                try {
+                    double spacingValue = Double.parseDouble(spacing.replaceAll("[^0-9.]", ""));
+                    if (spacingValue < 0.3 || spacingValue > 0.7) {
+                        results.add(createFormatIssue(
+                            "FMT_HEADING_SPACING_001",
+                            "Section " + next.getSectionId() + " spacing between heading and body text does not meet the standard",
+                            (int)next.getSectionId(),
+                            Severity.LOW,
+                            "Please adjust the spacing between heading and body text to 0.5 lines"
+                        ));
+                    }
+                } catch (NumberFormatException e) {
+                    logger.warn("Unable to parse spacing value");
+                }
+            }
+        }
+    }
+end
+
+// Rule 20: List Item Indentation Check
+rule "List Item Indentation Check"
+when
+    $section: Section(type == "list-item")
+then
+    String indent = (String)$section.getPropsMap().get("indent");
+    String level = (String)$section.getPropsMap().get("level");
+    
+    if (level != null && !level.isEmpty()) {
+        try {
+            int listLevel = Integer.parseInt(level);
+            double expectedIndent = listLevel * 0.5;
+            
+            if (indent != null && !indent.isEmpty()) {
+                double actualIndent = Double.parseDouble(indent.replaceAll("[^0-9.]", ""));
+                if (Math.abs(actualIndent - expectedIndent) > 0.1) {
+                    results.add(createFormatIssue(
+                        "FMT_LIST_INDENT",
+                        "Section " + $section.getSectionId() + " list item indentation does not meet the standard, should be " + expectedIndent + " inches",
+                        (int)$section.getSectionId(),
+                        Severity.LOW,
+                        "Please adjust the list item indentation"
+                    ));
+                }
+            }
+        } catch (NumberFormatException e) {
+            logger.warn("Unable to parse list indentation");
+        }
+    }
+end

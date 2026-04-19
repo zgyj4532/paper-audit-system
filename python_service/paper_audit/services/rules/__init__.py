@@ -1,21 +1,31 @@
 from .engine import (
     DEFAULT_FOCUS_AREAS,
+    JAVA_AUDIT_PATH,
+    JAVA_HEALTH_PATH,
+    audit_document_via_java_http,
     check_consistency_rules,
     check_document_rules,
     check_reference_content_rules,
     check_table_rules,
     check_text_rules,
+    build_java_audit_request,
     detect_reference_entries,
     extract_text_from_parsed_data,
+    normalize_java_audit_response,
 )
 
 __all__ = [
     "DEFAULT_FOCUS_AREAS",
+    "JAVA_AUDIT_PATH",
+    "JAVA_HEALTH_PATH",
+    "audit_document_via_java_http",
     "check_consistency_rules",
     "check_document_rules",
     "check_reference_content_rules",
     "check_table_rules",
     "check_text_rules",
+    "build_java_audit_request",
     "detect_reference_entries",
     "extract_text_from_parsed_data",
+    "normalize_java_audit_response",
 ]

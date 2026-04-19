@@ -1,0 +1,104 @@
+syntax = "proto3";
+
+package academic.auditor;
+
+// 为了兼容性，建议 Java 开发者使用的选项
+option java_multiple_files = true;
+option java_package = "com.auditor.grpc";
+option java_outer_classname = "AuditorProto";
+option go_package = "github.com/redspiderAI/ai-auditor-core/shared/protos;auditorpb";
+
+// --- 服务定义 ---
+
+service DocumentAuditor {
+  // 成员 A (Rust): 解析文档
+  rpc ParseDocument (ParseRequest) returns (ParsedData);
+
+  // 成员 B (Java): 执行格式与规则审查
+  rpc AuditRules (AuditRequest) returns (AuditResponse);
+
+  // 成员 C (Python): 语义与 AI 智能审查
+  rpc AnalyzeSemantics (SemanticRequest) returns (AuditResponse);
+
+  // 可选：写回批注后的文档
+  rpc InjectAnnotations (InjectRequest) returns (InjectResponse);
+}
+
+// --- 通用消息结构 ---
+
+message ParseRequest {
+  string file_path = 1;      // 文档在共享存储中的路径
+  string template_type = 2;  // 例如: "GB/T7714", "APA"
+}
+
+message ParsedData {
+  string doc_id = 1;
+  DocumentMetadata metadata = 2;
+  repeated Section sections = 3;
+  repeated Reference references = 4;
+}
+
+message DocumentMetadata {
+  string title = 1;
+  int32 page_count = 2;
+  float margin_top = 3;
+  float margin_bottom = 4;
+}
+
+message Section {
+  int32 section_id = 1;
+  string type = 2;           // "heading", "paragraph", "table", "figure"
+  int32 level = 3;           // 标题层级，0为正文
+  string text = 4;
+  map<string, string> props = 5; // {"font": "SimSun", "size": "12pt", "indent": "2"}
+}
+
+message Reference {
+  string ref_id = 1;         // 例如 "[1]"
+  string raw_text = 2;
+  bool is_valid_format = 3;
+}
+
+// --- 审查相关消息 ---
+
+message AuditRequest {
+  ParsedData data = 1;
+  string target_rule_set = 2;
+}
+
+message SemanticRequest {
+  repeated Section sections = 1;
+  string model_version = 2;  // 例如 "qwen-2.5-72b"
+}
+
+message AuditResponse {
+  repeated Issue issues = 1;
+  float score_impact = 2;    // 该模块发现的扣分项总计
+}
+
+// 将批注写回文档
+message InjectRequest {
+  string file_path = 1;      // 原始文档路径
+  repeated Issue issues = 2; // 要写回的批注（含位置/严重度等）
+}
+
+message InjectResponse {
+  string annotated_path = 1; // 生成的批注文档路径
+}
+
+message Issue {
+  string code = 1;           // 错误代码，如 "ERR_FONT_001"
+  string message = 2;        // 给用户的错误描述
+  int32 section_id = 3;      // 关联的段落 ID
+  Severity severity = 4;
+  string suggestion = 5;     // 修改建议
+  string original_snippet = 6; // 原始错误文本片段
+}
+
+enum Severity {
+  INFO = 0;
+  LOW = 1;
+  MEDIUM = 2;
+  HIGH = 3;
+  CRITICAL = 4;
+}
