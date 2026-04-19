@@ -69,7 +69,7 @@ class Settings(BaseSettings):
     # LLM / processing
     LLM_CHUNK_SIZE: int = 800
     LLM_CHUNK_OVERLAP: int = 100
-    LLM_QWEN_BATCH_SIZE: int = 4
+    LLM_QWEN_BATCH_SIZE: int = 4  # 并发 worker 数
     LLM_RATE_LIMIT: float = 0.5
     DEFAULT_ENABLED_MODULES: str = "typo,format,logic,reference"
     DEFAULT_STRICTNESS: int = 3

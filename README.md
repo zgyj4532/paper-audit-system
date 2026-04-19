@@ -4,8 +4,6 @@
 
 ## 系统架构全景
 
-下图使用 SVG 绘制，可直接在 README 中缩放查看，也便于后续单独维护。
-
 ![系统架构图](assets/system-architecture.svg)
 
 ---

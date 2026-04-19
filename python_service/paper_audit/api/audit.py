@@ -1021,7 +1021,10 @@ def _render_pdf_annotation_report(
         value = report_payload.get(key)
         if isinstance(value, str) and value.strip():
             candidate = Path(value)
-            if candidate.suffix.lower() == ".docx" and candidate not in source_docx_candidates:
+            if (
+                candidate.suffix.lower() == ".docx"
+                and candidate not in source_docx_candidates
+            ):
                 source_docx_candidates.append(candidate)
 
     for source_docx in source_docx_candidates:

@@ -82,17 +82,17 @@ def split_into_chunks(
                     cells = _normalize_cells(row)
                     if not cells:
                         continue
-                    _append_text_chunks(
-                        text="\t".join(cells),
-                        section_id=section_id,
-                        is_table=True,
-                        kind="row",
-                        extra={
+                    chunks.append(
+                        {
+                            "kind": "row",
+                            "section_id": section_id,
+                            "text": "\t".join(cells),
+                            "is_table": True,
                             "table_index": table_index,
                             "row_index": row_index,
                             "cell_count": len(cells),
                             "cells": cells,
-                        },
+                        }
                     )
                 continue
 
@@ -218,26 +218,18 @@ def _skipped_chunk_review(chunk: Dict[str, Any], reason: str) -> Dict[str, Any]:
     }
 
 
-def _group_table_chunks(chunks: List[Dict[str, Any]]) -> List[Dict[str, Any]]:
+def _group_chunks_by_section_id(chunks: List[Dict[str, Any]]) -> List[Dict[str, Any]]:
     groups: List[Dict[str, Any]] = []
-    index_by_key: Dict[tuple[Any, Any], int] = {}
+    index_by_key: Dict[Any, int] = {}
 
     for chunk in chunks:
-        if not bool(chunk.get("is_table")):
-            continue
-        key = (chunk.get("section_id"), chunk.get("table_index"))
+        key = chunk.get("section_id")
         group_index = index_by_key.get(key)
         if group_index is None:
             group_index = len(groups)
             index_by_key[key] = group_index
-            groups.append(
-                {
-                    "section_id": chunk.get("section_id"),
-                    "table_index": chunk.get("table_index"),
-                    "rows": [],
-                }
-            )
-        groups[group_index]["rows"].append(chunk)
+            groups.append({"section_id": chunk.get("section_id"), "chunks": []})
+        groups[group_index]["chunks"].append(chunk)
 
     return groups
 
@@ -406,6 +398,153 @@ async def _review_table_with_qwen(
         }
 
 
+async def _review_section_group_worker(
+    client: Any,
+    group: Dict[str, Any],
+    focus_areas: List[str],
+    fast_local_only: bool,
+) -> Dict[str, Any]:
+    chunks = group.get("chunks", [])
+    if chunks and all(bool(chunk.get("is_code_block")) for chunk in chunks):
+        return _skipped_chunk_review(chunks[0], "code_block")
+
+    if chunks and all(bool(chunk.get("is_table")) for chunk in chunks):
+        table_rows = [
+            {
+                "section_id": row.get("section_id"),
+                "table_index": row.get("table_index"),
+                "row_index": row.get("row_index"),
+                "cell_count": row.get("cell_count"),
+                "cells": row.get("cells", []),
+                "text": row.get("text"),
+            }
+            for row in chunks
+        ]
+        row_reviews = [
+            {
+                "section_id": row.get("section_id"),
+                "kind": "row",
+                "table_index": row.get("table_index"),
+                "row_index": row.get("row_index"),
+                "cell_count": row.get("cell_count"),
+                "cells": row.get("cells", []),
+                "text": row.get("text"),
+                "is_table": True,
+                "issues": [],
+                "issue_count": 0,
+            }
+            for row in table_rows
+        ]
+        local_table_issues = check_table_rules(table_rows, focus_areas)
+        if fast_local_only:
+            llm_table_issues: List[Dict[str, Any]] = []
+            table_backend = "local"
+            field_summary: Dict[str, Any] = {}
+            critical_gaps: List[str] = []
+        else:
+            table_result = await _review_table_with_qwen(
+                client, table_rows, focus_areas
+            )
+            llm_table_issues = table_result.get("table_issues", [])
+            table_backend = table_result.get("backend", "qwen")
+            field_summary = table_result.get("field_summary", {})
+            critical_gaps = table_result.get("critical_gaps", [])
+
+        normalized_local_issues = _dedupe_issues(local_table_issues)
+        normalized_llm_issues = _dedupe_issues(llm_table_issues)
+        merged_issues = _dedupe_issues(normalized_local_issues + normalized_llm_issues)
+        return {
+            "section_id": group.get("section_id"),
+            "kind": "table",
+            "text": "\n".join(str(row.get("text") or "") for row in chunks if row),
+            "is_table": True,
+            "table_index": chunks[0].get("table_index") if chunks else None,
+            "table_rows": table_rows,
+            "table_issues": merged_issues,
+            "local_issues": normalized_local_issues,
+            "llm_issues": normalized_llm_issues,
+            "issues": merged_issues,
+            "issue_count": len(merged_issues),
+            "row_reviews": row_reviews,
+            "field_summary": field_summary,
+            "critical_gaps": critical_gaps,
+            "backend": table_backend,
+        }
+
+    chunk_reviews: List[Dict[str, Any]] = []
+    aggregated_local_issues: List[Dict[str, Any]] = []
+    aggregated_llm_issues: List[Dict[str, Any]] = []
+    aggregated_issues: List[Dict[str, Any]] = []
+    backend = "local" if fast_local_only else "qwen"
+
+    for chunk in chunks:
+        if bool(chunk.get("is_code_block")):
+            review = _skipped_chunk_review(chunk, "code_block")
+            chunk_reviews.append(review)
+            continue
+
+        local_issues = check_text_rules(chunk["text"], focus_areas)
+        if fast_local_only:
+            llm_issues = []
+            text_backend = "local"
+        else:
+            text_result = await _review_chunk_with_qwen(client, chunk, focus_areas)
+            llm_issues = text_result
+            text_backend = "qwen"
+
+        normalized_local_issues = _normalize_issue_positions(
+            [issue for issue in local_issues if isinstance(issue, dict)],
+            chunk["text"],
+        )
+        normalized_llm_issues = _normalize_issue_positions(
+            [issue for issue in llm_issues if isinstance(issue, dict)],
+            chunk["text"],
+        )
+        normalized_local_issues = _dedupe_issues(normalized_local_issues)
+        normalized_llm_issues = _dedupe_issues(normalized_llm_issues)
+        merged_issues = _dedupe_issues(normalized_local_issues + normalized_llm_issues)
+        review = {
+            "section_id": chunk.get("section_id"),
+            "kind": chunk.get("kind", "text"),
+            "text": chunk.get("text"),
+            "is_table": False,
+            "local_issues": normalized_local_issues,
+            "llm_issues": normalized_llm_issues,
+            "issues": merged_issues,
+            "issue_count": len(merged_issues),
+            "backend": text_backend,
+        }
+
+        chunk_reviews.append(review)
+        backend = review.get("backend", backend)
+        aggregated_local_issues.extend(review.get("local_issues", []))
+        aggregated_llm_issues.extend(review.get("llm_issues", []))
+        aggregated_issues.extend(review.get("issues", []))
+
+    merged_local_issues = _dedupe_issues(aggregated_local_issues)
+    merged_llm_issues = _dedupe_issues(aggregated_llm_issues)
+    merged_issues = _dedupe_issues(aggregated_issues)
+
+    return {
+        "section_id": group.get("section_id"),
+        "kind": (
+            "table"
+            if chunks and all(bool(chunk.get("is_table")) for chunk in chunks)
+            else "section"
+        ),
+        "text": "\n".join(str(chunk.get("text") or "") for chunk in chunks if chunk),
+        "is_table": bool(chunks)
+        and all(bool(chunk.get("is_table")) for chunk in chunks),
+        "chunks": chunks,
+        "chunk_reviews": chunk_reviews,
+        "local_issues": merged_local_issues,
+        "llm_issues": merged_llm_issues,
+        "issues": merged_issues,
+        "issue_count": len(merged_issues),
+        "backend": backend,
+    }
+
+
 async def _verify_reference_with_qwen(
     client: Any, reference: Dict[str, Any]
 ) -> Dict[str, Any]:
@@ -434,6 +573,28 @@ async def _verify_reference_with_qwen(
             "risk_flags": ["llm_error"],
             "llm_backend": "qwen",
         }
+
+
+async def _verify_reference_worker(
+    client: Any, reference: Dict[str, Any], backend: str, fast_local_only: bool
+) -> Dict[str, Any]:
+    if fast_local_only or backend == "local":
+        local_result = _verify_reference_with_local(reference)
+        if fast_local_only:
+            local_result["reason"] = "fast_local_only"
+            local_result["risk_flags"] = list(
+                dict.fromkeys(["fast_local_only", *local_result.get("risk_flags", [])])
+            )
+        return local_result
+
+    qwen_result = await _verify_reference_with_qwen(client, reference)
+    if can_use_local_reference_verifier():
+        risk_flags = set(qwen_result.get("risk_flags", []))
+        if "llm_error" in risk_flags or (
+            backend == "auto" and qwen_result.get("verdict") == "unverified"
+        ):
+            return _verify_reference_with_local(reference)
+    return qwen_result
 
 
 def _verify_reference_with_local(reference: Dict[str, Any]) -> Dict[str, Any]:
@@ -474,22 +635,16 @@ async def verify_references(references: List[Dict[str, Any]]) -> List[Dict[str, 
         return results
 
     client = build_qwen_client()
-    batch_size = max(1, int(getattr(settings, "LLM_QWEN_BATCH_SIZE", 4)))
+    worker_count = max(1, int(getattr(settings, "LLM_QWEN_BATCH_SIZE", 4)))
+    semaphore = asyncio.Semaphore(worker_count)
 
-    for batch in _batch_items(list(references), batch_size):
-        batch_results = await asyncio.gather(
-            *[_verify_reference_with_qwen(client, reference) for reference in batch]
-        )
-        if can_use_local_reference_verifier():
-            for index, item in enumerate(batch_results):
-                if not isinstance(item, dict):
-                    continue
-                risk_flags = set(item.get("risk_flags", []))
-                if "llm_error" in risk_flags or (
-                    backend == "auto" and item.get("verdict") == "unverified"
-                ):
-                    batch_results[index] = _verify_reference_with_local(batch[index])
-        results.extend(batch_results)
+    async def run_one(reference: Dict[str, Any]) -> Dict[str, Any]:
+        async with semaphore:
+            return await _verify_reference_worker(
+                client, reference, backend, fast_local_only=False
+            )
+
+    results = await asyncio.gather(*[run_one(reference) for reference in references])
 
     return results
 
@@ -499,7 +654,7 @@ async def review_document(
 ) -> Dict[str, Any]:
     focus_areas = normalize_focus_areas(None)
     chunks = split_into_chunks(parsed_data)
-    chunk_reviews: List[Dict[str, Any]] = []
+    section_reviews: List[Dict[str, Any]] = []
     fast_local_only = _fast_local_only()
     client: Any = None
 
@@ -509,144 +664,26 @@ async def review_document(
             client = build_qwen_client()
         return client
 
-    batch_size = max(1, int(getattr(settings, "LLM_QWEN_BATCH_SIZE", 4)))
-    table_groups = _group_table_chunks(chunks)
+    worker_count = max(1, int(getattr(settings, "LLM_QWEN_BATCH_SIZE", 4)))
+    semaphore = asyncio.Semaphore(worker_count)
 
-    table_review_map: Dict[tuple[Any, Any], Dict[str, Any]] = {}
-    for batch in _batch_items(table_groups, batch_size):
-        for group in batch:
-            table_rows = group.get("rows", [])
-            local_table_issues = check_table_rules(table_rows, focus_areas)
-            if fast_local_only:
-                llm_table_issues: List[Dict[str, Any]] = []
-                table_backend = "local"
-                field_summary: Dict[str, Any] = {}
-                critical_gaps: List[str] = []
-            else:
-                table_client = ensure_client()
-                table_result = await _review_table_with_qwen(
-                    table_client, table_rows, focus_areas
-                )
-                llm_table_issues = table_result.get("table_issues", [])
-                table_backend = table_result.get("backend", "qwen")
-                field_summary = table_result.get("field_summary", {})
-                critical_gaps = table_result.get("critical_gaps", [])
+    section_groups = _group_chunks_by_section_id(chunks)
 
-            normalized_local_table_issues = _dedupe_issues(local_table_issues)
-            normalized_llm_table_issues = _dedupe_issues(llm_table_issues)
-            merged_table_issues = _dedupe_issues(
-                normalized_local_table_issues + normalized_llm_table_issues
+    async def review_section_group(group: Dict[str, Any]) -> Dict[str, Any]:
+        group_chunks = group.get("chunks", [])
+        if group_chunks and all(
+            bool(chunk.get("is_code_block")) for chunk in group_chunks
+        ):
+            return _skipped_chunk_review(group_chunks[0], "code_block")
+        async with semaphore:
+            section_client = ensure_client()
+            return await _review_section_group_worker(
+                section_client, group, focus_areas, fast_local_only
             )
-            row_reviews: List[Dict[str, Any]] = []
-            for row in table_rows:
-                row_index = row.get("row_index")
-                row_issues = [
-                    issue
-                    for issue in merged_table_issues
-                    if issue.get("position", {}).get("row") == row_index
-                ]
-                row_reviews.append(
-                    {
-                        "section_id": row.get("section_id"),
-                        "kind": "row",
-                        "table_index": row.get("table_index"),
-                        "row_index": row.get("row_index"),
-                        "cell_count": row.get("cell_count"),
-                        "cells": row.get("cells", []),
-                        "text": row.get("text"),
-                        "is_table": True,
-                        "issues": row_issues,
-                        "issue_count": len(row_issues),
-                    }
-                )
 
-            table_key = (group.get("section_id"), group.get("table_index"))
-            table_review_map[table_key] = {
-                "section_id": group.get("section_id"),
-                "kind": "table",
-                "table_index": group.get("table_index"),
-                "is_table": True,
-                "rows": table_rows,
-                "row_reviews": row_reviews,
-                "local_issues": normalized_local_table_issues,
-                "llm_issues": normalized_llm_table_issues,
-                "table_issues": merged_table_issues,
-                "issues": merged_table_issues,
-                "issue_count": len(merged_table_issues),
-                "field_summary": field_summary,
-                "critical_gaps": critical_gaps,
-                "backend": table_backend,
-            }
-
-    for batch in _batch_items(chunks, batch_size):
-        reviewable_chunks = [
-            chunk
-            for chunk in batch
-            if not bool(chunk.get("is_table")) and not bool(chunk.get("is_code_block"))
-        ]
-        if reviewable_chunks:
-            local_issue_sets = [
-                check_text_rules(chunk["text"], focus_areas)
-                for chunk in reviewable_chunks
-            ]
-            if fast_local_only:
-                llm_issue_sets = [[] for _ in reviewable_chunks]
-            else:
-                text_client = ensure_client()
-                llm_issue_sets = await asyncio.gather(
-                    *[
-                        _review_chunk_with_qwen(text_client, chunk, focus_areas)
-                        for chunk in reviewable_chunks
-                    ]
-                )
-        else:
-            local_issue_sets = []
-            llm_issue_sets = []
-
-        reviewable_index = 0
-        for chunk in batch:
-            if bool(chunk.get("is_code_block")):
-                chunk_reviews.append(_skipped_chunk_review(chunk, "code_block"))
-                continue
-            if bool(chunk.get("is_table")):
-                table_key = (chunk.get("section_id"), chunk.get("table_index"))
-                if table_key in table_review_map and not any(
-                    item.get("section_id") == chunk.get("section_id")
-                    and item.get("table_index") == chunk.get("table_index")
-                    for item in chunk_reviews
-                ):
-                    chunk_reviews.append(table_review_map[table_key])
-                continue
-
-            local_issues = local_issue_sets[reviewable_index]
-            llm_issues = llm_issue_sets[reviewable_index]
-            reviewable_index += 1
-
-            normalized_local_issues = _normalize_issue_positions(
-                [issue for issue in local_issues if isinstance(issue, dict)],
-                chunk["text"],
-            )
-            normalized_llm_issues = _normalize_issue_positions(
-                [issue for issue in llm_issues if isinstance(issue, dict)],
-                chunk["text"],
-            )
-            normalized_local_issues = _dedupe_issues(normalized_local_issues)
-            normalized_llm_issues = _dedupe_issues(normalized_llm_issues)
-            merged_issues = _dedupe_issues(
-                normalized_local_issues + normalized_llm_issues
-            )
-            chunk_reviews.append(
-                {
-                    "section_id": chunk.get("section_id"),
-                    "kind": chunk.get("kind", "text"),
-                    "text": chunk.get("text"),
-                    "is_table": bool(chunk.get("is_table")),
-                    "local_issues": normalized_local_issues,
-                    "llm_issues": normalized_llm_issues,
-                    "issues": merged_issues,
-                    "issue_count": len(merged_issues),
-                }
-            )
+    section_reviews = await asyncio.gather(
+        *[review_section_group(group) for group in section_groups]
+    )
 
     references = detect_reference_entries(parsed_data)
     reference_verification = await verify_references(references)
@@ -655,17 +692,20 @@ async def review_document(
     return {
         "backend": "qwen",
         "chunks": chunks,
-        "chunk_reviews": chunk_reviews,
+        "chunk_reviews": section_reviews,
+        "section_reviews": section_reviews,
         "reference_verification": reference_verification,
         "consistency_issues": consistency_issues,
         "summary": {
             "chunk_count": len(chunks),
+            "section_count": len(section_groups),
             "reference_count": len(references),
             "chunk_issue_count": sum(
-                item.get("issue_count", 0) for item in chunk_reviews
+                item.get("issue_count", 0) for item in section_reviews
             ),
             "consistency_issue_count": len(consistency_issues),
-            "qwen_batch_size": batch_size,
+            "qwen_worker_count": worker_count,
+            "qwen_batch_size": worker_count,
         },
     }
 

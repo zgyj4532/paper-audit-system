@@ -179,9 +179,7 @@ def ensure_task_docx_artifact(
                         None,
                     )
                     if docx_name:
-                        extracted = (
-                            resolved_output_dir / Path(docx_name).name
-                        )
+                        extracted = resolved_output_dir / Path(docx_name).name
                         extracted.write_bytes(archive.read(docx_name))
                         return extracted, warnings
 
