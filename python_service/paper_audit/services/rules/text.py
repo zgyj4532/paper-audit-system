@@ -59,24 +59,6 @@ _REFERENCE_FORMAT_PATTERNS = (
         "删除多余的左括号",
         "REF-003",
     ),
-    (
-        re.compile(r"Keywords:[A-Za-z]"),
-        "Keywords 后缺少空格",
-        "改为 Keywords: ",
-        "FORMAT-003",
-    ),
-    (
-        re.compile(r"Abstract:[A-Za-z]"),
-        "Abstract 后缺少空格",
-        "改为 Abstract: ",
-        "FORMAT-004",
-    ),
-    (
-        re.compile(r"[A-Za-z]{2,};[A-Za-z]{2,}"),
-        "英文关键词之间缺少空格",
-        "在分号后补空格",
-        "FORMAT-005",
-    ),
 )
 
 

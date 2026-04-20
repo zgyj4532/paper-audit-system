@@ -8,12 +8,7 @@ from typing import Any, Dict, List, TypedDict
 from ...config import settings
 from ..llm import build_qwen_client, normalize_focus_areas
 from ..rules import (
-    audit_document_via_java_http,
-    check_consistency_rules,
-    check_table_rules,
-    check_text_rules,
-    detect_reference_entries,
-    normalize_java_audit_response,
+    review_document as review_document_via_rules,
 )
 from ..rules.common import is_code_like_text
 from ..vector import (
@@ -828,20 +823,7 @@ async def verify_references(references: List[Dict[str, Any]]) -> List[Dict[str, 
 async def review_document(
     parsed_data: Dict[str, Any], source_file: str | None = None
 ) -> Dict[str, Any]:
-    backend = _rules_backend()
-    if backend in {"java_http", "java", "http", "hybrid"}:
-        try:
-            return await _review_document_java_http(parsed_data, source_file=source_file)
-        except Exception as exc:
-            logger.warning("Java HTTP audit failed, falling back to local rules: %s", exc)
-            if backend == "hybrid":
-                local_review = await _review_document_local(parsed_data, source_file=source_file)
-                local_review["backend"] = "hybrid"
-                local_review["java_error"] = str(exc)
-                return local_review
-            return await _review_document_local(parsed_data, source_file=source_file)
-
-    return await _review_document_local(parsed_data, source_file=source_file)
+    return await review_document_via_rules(parsed_data, source_file=source_file)
 
 
 def build_workflow():

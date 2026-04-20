@@ -17,8 +17,8 @@ import static org.junit.jupiter.api.Assertions.*;
 /**
  * SectionFilterService Special Test
  *
- * <p>Important design constraint: stop detection only applies to sections with <b>type=heading</b>,
- * directory entries with type=paragraph (e.g., "学位论文数据集\t25") do not trigger truncation.
+ * <p>Important design constraint: table sections are skipped from review,
+ * and directory entries with type=paragraph (e.g., "学位论文数据集\t25") are preserved.
  *
  * <p>Test coverage:
  * <ol>
@@ -64,29 +64,7 @@ public class SectionFilterServiceTest {
     }
 
     // ─────────────────────────────────────────────────────────────────────────
-    // 2. Unit tests: isWhitelisted
-    // ─────────────────────────────────────────────────────────────────────────
-
-    @Test
-    @DisplayName("Whitelist: exact match should hit")
-    public void testIsWhitelisted_hit() {
-        assertTrue(filterService.isWhitelisted("学位论文数据集"));
-        assertTrue(filterService.isWhitelisted("独创性声明"));
-        assertTrue(filterService.isWhitelisted("学位论文版权使用授权书"));
-        assertTrue(filterService.isWhitelisted("版权声明"));
-    }
-
-    @Test
-    @DisplayName("Whitelist: non-whitelist text should not hit")
-    public void testIsWhitelisted_miss() {
-        assertFalse(filterService.isWhitelisted("学位论文数据集\t25"));  // with tab not exact match
-        assertFalse(filterService.isWhitelisted("摘要"));
-        assertFalse(filterService.isWhitelisted(null));
-        assertFalse(filterService.isWhitelisted(""));
-    }
-
-    // ─────────────────────────────────────────────────────────────────────────
-    // 3. Unit tests: filterSections truncation logic
+    // 2. Unit tests: filterSections truncation logic
     // ─────────────────────────────────────────────────────────────────────────
 
     @Test
@@ -115,56 +93,60 @@ public class SectionFilterServiceTest {
     }
 
     @Test
-    @DisplayName("filterSections: heading type keyword at end, truncate last 1")
+    @DisplayName("filterSections: heading type keyword at end is preserved")
     public void testFilterSections_headingStopAtEnd() {
-        // Last one is heading type "学位论文数据集" → triggers truncation
+        // Heading type "学位论文数据集" is treated like normal content in the filter stage
         ParsedData data = buildParsedDataMixed(
             new SectionSpec("摘要",       "paragraph"),
             new SectionSpec("第一章",     "paragraph"),
             new SectionSpec("结论",       "paragraph"),
             new SectionSpec("参考文献",   "paragraph"),
-            new SectionSpec("学位论文数据集", "heading")   // ← heading, triggers truncation
+            new SectionSpec("学位论文数据集", "heading")
         );
         ParsedData result = filterService.filterSections(data);
-        assertEquals(4, result.getSectionsCount(), "Heading keyword at end should truncate 1");
-        assertEquals("参考文献", result.getSections(3).getText());
+        assertEquals(5, result.getSectionsCount(), "Heading keyword at end should be preserved");
+        assertEquals("学位论文数据集", result.getSections(4).getText());
     }
 
     @Test
-    @DisplayName("filterSections: heading type keyword in middle, truncate all following")
+    @DisplayName("filterSections: heading type keyword in middle is preserved")
     public void testFilterSections_headingStopInMiddle() {
         ParsedData data = buildParsedDataMixed(
             new SectionSpec("摘要",           "paragraph"),
             new SectionSpec("第一章",         "paragraph"),
-            new SectionSpec("学位论文数据集", "heading"),   // ← heading, triggers truncation
+            new SectionSpec("学位论文数据集", "heading"),
             new SectionSpec("附录A",          "paragraph"),
             new SectionSpec("附录B",          "paragraph")
         );
         ParsedData result = filterService.filterSections(data);
-        assertEquals(2, result.getSectionsCount(), "Heading keyword in middle should truncate following 3");
+        assertEquals(5, result.getSectionsCount(), "Heading keyword in middle should be preserved");
     }
 
     @Test
-    @DisplayName("filterSections: heading type keyword at beginning, result empty")
+    @DisplayName("filterSections: heading type keyword at beginning is preserved")
     public void testFilterSections_headingStopAtBeginning() {
         ParsedData data = buildParsedDataMixed(
-            new SectionSpec("学位论文数据集", "heading"),   // ← heading, triggers truncation
+            new SectionSpec("学位论文数据集", "heading"),
             new SectionSpec("摘要",           "paragraph"),
             new SectionSpec("结论",           "paragraph")
         );
         ParsedData result = filterService.filterSections(data);
-        assertEquals(0, result.getSectionsCount(), "Heading keyword at beginning should result in empty");
+        assertEquals(3, result.getSectionsCount(), "Heading keyword at beginning should be preserved");
     }
 
     @Test
-    @DisplayName("filterSections: whitelist sections are silently skipped")
-    public void testFilterSections_whitelistSkipped() {
-        ParsedData data = buildParsedData("摘要", "独创性声明", "第一章", "版权声明", "结论");
+    @DisplayName("filterSections: table sections are skipped")
+    public void testFilterSections_tableSkipped() {
+        ParsedData data = buildParsedDataMixed(
+            new SectionSpec("摘要", "paragraph"),
+            new SectionSpec("学位论文数据集", "paragraph"),
+            new SectionSpec("附录表格", "table"),
+            new SectionSpec("结论", "paragraph")
+        );
         ParsedData result = filterService.filterSections(data);
-        // 独创性声明 and 版权声明 are skipped, remaining 摘要、第一章、结论
-        assertEquals(3, result.getSectionsCount(), "Whitelist sections should be skipped");
+        assertEquals(3, result.getSectionsCount(), "Table sections should be skipped");
         assertEquals("摘要", result.getSections(0).getText());
-        assertEquals("第一章", result.getSections(1).getText());
+        assertEquals("学位论文数据集", result.getSections(1).getText());
         assertEquals("结论", result.getSections(2).getText());
     }
 
@@ -192,11 +174,11 @@ public class SectionFilterServiceTest {
         assertTrue(tableRowCount > 0, "JSON should contain thesis dataset table rows (table_row), actual count=" + tableRowCount);
 
         // Verify section_id=64 in JSON is paragraph type directory entry (should not trigger truncation)
-        boolean hasParagraphToc = rawData.getSectionsList().stream()
+        boolean hasParagraphToc64 = rawData.getSectionsList().stream()
                 .anyMatch(s -> s.getSectionId() == 64
                         && "paragraph".equals(s.getType())
                         && s.getText().contains("学位论文数据集"));
-        assertTrue(hasParagraphToc, "section_id=64 should be paragraph type directory entry");
+        assertTrue(hasParagraphToc64, "section_id=64 should be paragraph type directory entry");
 
         // Verify last section in JSON is heading type "学位论文数据集" (should trigger truncation)
         boolean hasHeadingStop = rawData.getSectionsList().stream()
@@ -208,36 +190,34 @@ public class SectionFilterServiceTest {
         int filteredCount = filtered.getSectionsCount();
         logger.info("Filtered section count: {}", filteredCount);
 
-        // Verify: filtered count less than original (truncated heading title line + 21 table rows = 22)
-        assertTrue(filteredCount < originalCount,
-                "Filtered section count should be less than original, original=" + originalCount + " filtered=" + filteredCount);
+        // Verify: the filter does not truncate non-table content
+        assertTrue(filteredCount <= originalCount,
+                "Filtered section count should not exceed original, original=" + originalCount + " filtered=" + filteredCount);
 
-        // Verify: truncation count is 22 (1 heading title + 21 table_row)
-        int removedCount = originalCount - filteredCount;
-        assertEquals(22, removedCount,
-                "Should truncate 22 sections (1 heading title line + 21 table_row), actual truncated=" + removedCount);
+        // Verify: only table sections are removed, if any exist in the raw data
+        long tableCount = rawData.getSectionsList().stream()
+            .filter(s -> "table".equalsIgnoreCase(s.getType()))
+            .count();
+        long filteredTables = filtered.getSectionsList().stream()
+            .filter(s -> "table".equalsIgnoreCase(s.getType()))
+            .count();
+        assertEquals(0, filteredTables,
+            "No table should exist after filtering, actual count=" + filteredTables);
 
-        // Verify: no heading type "学位论文数据集" after filtering
-        boolean hasStopHeading = filtered.getSectionsList().stream()
-                .anyMatch(s -> "heading".equals(s.getType())
-                        && filterService.matchesStopKeyword(s.getText()));
-        assertFalse(hasStopHeading, "No heading type '学位论文数据集' should exist after filtering");
+        if (tableCount > 0) {
+            int removedCount = originalCount - filteredCount;
+            assertEquals(tableCount, removedCount,
+                "Should skip only table sections, actual truncated=" + removedCount);
+        }
 
-        // Verify: no table_row after filtering (all table rows truncated)
-        long filteredTableRows = filtered.getSectionsList().stream()
-                .filter(s -> "table_row".equals(s.getType()))
-                .count();
-        assertEquals(0, filteredTableRows,
-                "No table_row should exist after filtering, thesis dataset tables should be fully truncated, actual count=" + filteredTableRows);
+        // Verify: paragraph type directory entry "学位论文数据集" still kept
+        boolean hasParagraphToc = filtered.getSectionsList().stream()
+            .anyMatch(s -> "paragraph".equalsIgnoreCase(s.getType())
+                && s.getText().contains("学位论文数据集"));
+        assertTrue(hasParagraphToc, "Paragraph type directory entry '学位论文数据集' should be kept in filtered result");
 
-        // Verify: paragraph type directory entry "学位论文数据集\t25" still kept (not truncated)
-        boolean hasTocEntry = filtered.getSectionsList().stream()
-                .anyMatch(s -> "paragraph".equals(s.getType())
-                        && s.getText().contains("学位论文数据集"));
-        assertTrue(hasTocEntry, "Paragraph type directory entry '学位论文数据集\\t25' should be kept in filtered result");
-
-        logger.info("Truncation summary: original {} sections, truncated {} (1 heading title line + {} table_row)",
-                originalCount, removedCount, tableRowCount);
+        logger.info("Filtering summary: original {} sections, filtered {} sections, {} table sections in raw data",
+            originalCount, filteredCount, tableCount);
     }
 
     @Test

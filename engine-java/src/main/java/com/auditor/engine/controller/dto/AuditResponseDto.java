@@ -44,7 +44,7 @@ public record AuditResponseDto(
                 null,
                 null,
                 "drools",
-                List.of(new IssueDto("ERR_HTTP_REQUEST", message, 0, "HIGH", "", "")),
+                List.of(new IssueDto("ERR_HTTP_REQUEST", message, null, "HIGH", "", "")),
                 0.0f,
                 new SummaryDto(1, 1, 0, 0)
         );
@@ -53,16 +53,17 @@ public record AuditResponseDto(
     public record IssueDto(
             String code,
             String message,
-            int sectionId,
+            Integer sectionId,
             String severity,
             String suggestion,
             String originalSnippet
     ) {
         public static IssueDto fromProto(Issue issue) {
+            Integer sectionId = issue.getSectionId() == 0 ? null : issue.getSectionId();
             return new IssueDto(
                     issue.getCode(),
                     issue.getMessage(),
-                    issue.getSectionId(),
+                    sectionId,
                     issue.getSeverity().name(),
                     issue.getSuggestion(),
                     issue.getOriginalSnippet()

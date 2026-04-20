@@ -13,6 +13,112 @@ fn max_usize(left: usize, right: usize) -> usize {
     left.max(right)
 }
 
+fn parse_pt_value(size_pt: Option<&str>) -> Option<f64> {
+    size_pt
+        .and_then(|value| value.strip_suffix("pt"))
+        .and_then(|value| value.parse::<f64>().ok())
+}
+
+fn is_heading_like_terminator(section: &SectionInfo, text: &str) -> bool {
+    let normalized = text.trim();
+    if normalized.is_empty() || normalized.len() > 30 {
+        return false;
+    }
+
+    let has_heading_style = section
+        .format
+        .style
+        .as_deref()
+        .map(|style| style.to_lowercase().contains("heading"))
+        .unwrap_or(false);
+    if has_heading_style {
+        return true;
+    }
+
+    let size_pt = parse_pt_value(section.format.size_pt.as_deref()).unwrap_or(0.0);
+    let bold = section.format.bold.unwrap_or(false);
+    let title_like = !normalized.contains('。')
+        && !normalized.contains('.')
+        && !normalized.contains('，')
+        && !normalized.contains(',')
+        && !normalized.contains('；')
+        && !normalized.contains(';');
+
+    if title_like && (size_pt >= 14.0 || (bold && size_pt >= 12.0)) {
+        return true;
+    }
+
+    false
+}
+
+fn is_reference_heading(text: &str) -> bool {
+    let normalized = text.trim().trim_matches('：').trim_matches(':');
+    normalized == "参考文献"
+}
+
+fn is_reference_ending_section(section: &SectionInfo, text: &str) -> bool {
+    let normalized = text.trim();
+    if normalized.is_empty() {
+        return false;
+    }
+
+    if section.is_table {
+        return true;
+    }
+
+    let stop_prefixes = ["作者简介", "致谢", "附录"];
+    if stop_prefixes
+        .iter()
+        .any(|prefix| normalized.starts_with(prefix))
+    {
+        return true;
+    }
+
+    if is_heading_like_terminator(section, text) {
+        return true;
+    }
+
+    false
+}
+
+fn extract_references(sections_input: &[SectionInfo]) -> Vec<serde_json::Value> {
+    let mut references = Vec::new();
+    let mut in_reference_block = false;
+
+    for (index, section) in sections_input.iter().enumerate() {
+        let text = section.text.trim();
+        if text.is_empty() {
+            continue;
+        }
+
+        if !in_reference_block {
+            if is_reference_heading(text) {
+                in_reference_block = true;
+            }
+            continue;
+        }
+
+        if is_reference_ending_section(section, text) {
+            break;
+        }
+
+        let reference_index = references.len() + 1;
+        let page_start = section.page_start.unwrap_or((index / 20) + 1);
+        let page_end = section.page_end.unwrap_or(page_start);
+        references.push(json!({
+            "index": reference_index,
+            "ref_id": format!("[{}]", reference_index),
+            "text": text,
+            "raw_text": text,
+            "section_id": index + 1,
+            "page_start": page_start,
+            "page_end": page_end
+        }));
+    }
+
+    references
+}
+
 pub(crate) fn temp_output_path(input_path: &Path) -> PathBuf {
     let base = std::env::var("RUST_TEMP_DIR").unwrap_or_else(|_| "./temp/rust_engine".to_string());
     let mut out_dir = PathBuf::from(base);
@@ -594,6 +700,8 @@ pub(crate) fn build_response(
         })
         .collect::<Vec<_>>();
 
+    let references = extract_references(&sections_input);
+
     let word_count = sections_input
         .iter()
         .flat_map(|p| p.text.split_whitespace())
@@ -611,6 +719,7 @@ pub(crate) fn build_response(
     let temp_output_path = temp_output_path(input_path);
     let mut data = serde_json::Map::new();
     data.insert("sections".to_string(), json!(sections));
+    data.insert("references".to_string(), json!(references.clone()));
     if options.extract_styles {
         data.insert(
             "styles".to_string(),
@@ -635,6 +744,7 @@ pub(crate) fn build_response(
         "success": true,
         "data": data.clone(),
         "sections": sections,
+        "references": references,
         "styles": if options.extract_styles {
             json!({
                 "default_run": {

@@ -1,8 +1,9 @@
 from __future__ import annotations
 
 import logging
+import asyncio
 from pathlib import Path
-from typing import Any, Dict, Iterable, List
+from typing import Any, Dict, List
 
 import httpx
 
@@ -18,6 +19,8 @@ logger = logging.getLogger(__name__)
 
 JAVA_AUDIT_PATH = "/api/v1/rules/audit"
 JAVA_HEALTH_PATH = "/api/v1/rules/health"
+_JAVA_READY_RETRY_ATTEMPTS = 8
+_JAVA_READY_RETRY_DELAY_SECONDS = 0.75
 _SEVERITY_TO_SCORE = {
     "CRITICAL": 5,
     "HIGH": 4,
@@ -39,6 +42,7 @@ __all__ = [
     "detect_reference_entries",
     "extract_text_from_parsed_data",
     "normalize_java_audit_response",
+    "review_document",
 ]
 
 
@@ -61,6 +65,36 @@ def _stringify(value: Any) -> str:
     if isinstance(value, (str, int, float)):
         return str(value)
     return str(value)
+
+
+def _first_not_none(*values: Any) -> Any:
+    for value in values:
+        if value is not None:
+            return value
+    return None
+
+
+async def _wait_for_java_health(client: httpx.AsyncClient) -> None:
+    for attempt in range(1, _JAVA_READY_RETRY_ATTEMPTS + 1):
+        try:
+            response = await client.get(JAVA_HEALTH_PATH)
+            response.raise_for_status()
+            payload = response.json()
+            if isinstance(payload, dict) and payload.get("status") == "healthy":
+                return
+        except Exception:
+            if attempt >= _JAVA_READY_RETRY_ATTEMPTS:
+                raise
+            await asyncio.sleep(_JAVA_READY_RETRY_DELAY_SECONDS)
+
+
+def _should_retry_java_audit(exc: Exception) -> bool:
+    if isinstance(exc, httpx.RequestError):
+        return True
+    if isinstance(exc, httpx.HTTPStatusError):
+        status_code = exc.response.status_code
+        return status_code in {502, 503, 504}
+    return False
 
 
 def _build_java_props(section: Dict[str, Any]) -> Dict[str, str]:
@@ -135,7 +169,14 @@ def build_java_audit_request(
                 continue
             request_sections.append(
                 {
-                    "sectionId": section.get("section_id") or section.get("id"),
+                    "sectionId": _first_not_none(
+
+
+                        section.get("sectionId"),
+                        section.get("sectionID"),
+                        section.get("section_id"),
+                        section.get("id"),
+                    ),
                     "type": section.get("element_type") or section.get("type"),
                     "level": section.get("level"),
                     "text": section.get("raw_text") or section.get("text") or "",
@@ -197,17 +238,37 @@ async def audit_document_via_java_http(
     )
 
     async with httpx.AsyncClient(base_url=base_url, timeout=timeout) as client:
-        response = await client.post(JAVA_AUDIT_PATH, json=request_payload)
-        response.raise_for_status()
-        payload = response.json()
-        if not isinstance(payload, dict):
-            raise RuntimeError("Java audit response must be a JSON object")
-        logger.info(
-            "Java audit API completed: status_code=%s, issue_count=%s",
-            response.status_code,
-            len(payload.get("issues", [])) if isinstance(payload.get("issues"), list) else 0,
-        )
-        return payload
+        last_error: Exception | None = None
+        for attempt in range(1, _JAVA_READY_RETRY_ATTEMPTS + 1):
+            try:
+                if attempt > 1:
+                    await _wait_for_java_health(client)
+                response = await client.post(JAVA_AUDIT_PATH, json=request_payload)
+                response.raise_for_status()
+                payload = response.json()
+                if not isinstance(payload, dict):
+                    raise RuntimeError("Java audit response must be a JSON object")
+                logger.info(
+                    "Java audit API completed: status_code=%s, issue_count=%s",
+                    response.status_code,
+                    len(payload.get("issues", []))
+                    if isinstance(payload.get("issues"), list)
+                    else 0,
+                )
+                return payload
+            except Exception as exc:
+                last_error = exc
+                if attempt >= _JAVA_READY_RETRY_ATTEMPTS or not _should_retry_java_audit(exc):
+                    break
+                logger.warning(
+                    "Java audit attempt %s failed, retrying after health check: %s",
+                    attempt,
+                    exc,
+                )
+                await asyncio.sleep(_JAVA_READY_RETRY_DELAY_SECONDS)
+
+        assert last_error is not None
+        raise last_error
 
 
 def _normalize_java_issue_severity(severity: Any) -> int:
@@ -238,7 +299,11 @@ def normalize_java_audit_response(
             if not isinstance(issue, dict):
                 continue
             code = _stringify(issue.get("code") or issue.get("rule_code") or "")
-            section_id = issue.get("sectionId") or issue.get("section_id")
+            section_id = _first_not_none(
+                issue.get("sectionId"),
+                issue.get("sectionID"),
+                issue.get("section_id"),
+            )
             normalized_issue = {
                 "issue_type": _infer_issue_type_from_code(code),
                 "severity": _normalize_java_issue_severity(issue.get("severity")),
@@ -264,3 +329,113 @@ def normalize_java_audit_response(
         "summary": summary if isinstance(summary, dict) else {},
         "raw": response,
     }
+
+
+def _build_local_chunk_reviews(parsed_data: Dict[str, Any]) -> List[Dict[str, Any]]:
+    data = _unwrap_parsed_data(parsed_data)
+    sections = data.get("sections", []) if isinstance(data, dict) else []
+    chunk_reviews: List[Dict[str, Any]] = []
+    focus_areas = DEFAULT_FOCUS_AREAS
+
+    if not isinstance(sections, list):
+        return chunk_reviews
+
+    for index, section in enumerate(sections, start=1):
+        if not isinstance(section, dict):
+            continue
+
+        section_id = section.get("id") or section.get("section_id") or index
+        is_table = bool(section.get("is_table"))
+        text = str(section.get("raw_text") or section.get("text") or "")
+        issues: List[Dict[str, Any]] = []
+
+        if is_table:
+            table_rows = section.get("table_rows")
+            if isinstance(table_rows, list) and table_rows:
+                issues.extend(check_table_rules(table_rows, focus_areas))
+            elif text:
+                issues.extend(check_text_rules(text, focus_areas))
+        else:
+            if text:
+                issues.extend(check_text_rules(text, focus_areas))
+
+        chunk_reviews.append(
+            {
+                "section_id": section_id,
+                "kind": "table" if is_table else "section",
+                "text": text,
+                "is_table": is_table,
+                "issues": issues,
+                "issue_count": len(issues),
+                "backend": "local",
+                "java_issues": [],
+            }
+        )
+
+    return chunk_reviews
+
+
+async def review_document(
+    parsed_data: Dict[str, Any], source_file: str | None = None
+) -> Dict[str, Any]:
+    try:
+        java_response = await audit_document_via_java_http(
+            parsed_data, source_file=source_file
+        )
+        normalized_java = normalize_java_audit_response(java_response)
+        chunk_reviews = [
+            {
+                "section_id": item.get("section_id"),
+                "kind": "table" if bool(item.get("is_table")) else "section",
+                "text": item.get("text"),
+                "is_table": bool(item.get("is_table")),
+                "issues": item.get("issues", []),
+                "issue_count": item.get("issue_count", 0),
+                "backend": "java_http",
+                "java_issues": item.get("issues", []),
+            }
+            for item in _build_local_chunk_reviews(parsed_data)
+        ]
+        return {
+            "backend": "java_http",
+            "java_review": normalized_java["raw"],
+            "chunks": [],
+            "chunk_reviews": chunk_reviews,
+            "section_reviews": chunk_reviews,
+            "reference_verification": [],
+            "consistency_issues": [],
+            "summary": {
+                "chunk_count": len(chunk_reviews),
+                "section_count": len(chunk_reviews),
+                "reference_count": len(detect_reference_entries(parsed_data)),
+                "chunk_issue_count": len(normalized_java["issues"]),
+                "consistency_issue_count": 0,
+                "java_issue_count": len(normalized_java["issues"]),
+                "java_score_impact": normalized_java.get("score_impact", 0),
+            },
+        }
+    except Exception as exc:
+        logger.warning("Java HTTP audit failed, falling back to local rules: %s", exc)
+        chunk_reviews = _build_local_chunk_reviews(parsed_data)
+        consistency_issues = check_consistency_rules(parsed_data, source_file=source_file)
+        references = detect_reference_entries(parsed_data)
+        return {
+            "backend": "local",
+            "java_review": {"status": "fallback", "error": str(exc)},
+            "chunks": [],
+            "chunk_reviews": chunk_reviews,
+            "section_reviews": chunk_reviews,
+            "reference_verification": [],
+            "consistency_issues": consistency_issues,
+            "summary": {
+                "chunk_count": len(chunk_reviews),
+                "section_count": len(chunk_reviews),
+                "reference_count": len(references),
+                "chunk_issue_count": sum(
+                    item.get("issue_count", 0) for item in chunk_reviews
+                ),
+                "consistency_issue_count": len(consistency_issues),
+                "java_issue_count": 0,
+                "java_score_impact": 0,
+            },
+        }

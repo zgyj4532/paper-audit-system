@@ -1,13 +1,12 @@
 package rules.reference
 
 import com.auditor.grpc.*
-import org.slf4j.Logger
 import java.util.regex.Pattern
 import java.util.regex.Matcher
 import java.util.*
 
 global java.util.List results
-global Logger logger
+global org.slf4j.Logger logger
 
 dialect "java"
 
@@ -61,28 +60,36 @@ then
     }
     
     if (refNum > 0) {
-        Pattern yearPattern = Pattern.compile("\\b(\\d{4})\\b");
-        Matcher yearMatcher = yearPattern.matcher(rawText);
-        
-        while (yearMatcher.find()) {
+        String window = rawText;
+        int typeIndex = rawText.indexOf("[J]");
+        if (typeIndex >= 0) {
+            window = rawText.substring(typeIndex + 3);
+        }
+        int doiIndex = window.toUpperCase().indexOf("DOI");
+        if (doiIndex >= 0) {
+            window = window.substring(0, doiIndex);
+        }
+        Integer year = null;
+        Matcher yearMatcher = Pattern.compile("(?<!\\d)(\\d{4})(?!\\d)").matcher(window);
+        if (yearMatcher.find()) {
             try {
-                int year = Integer.parseInt(yearMatcher.group(1));
-                int currentYear = 2026;
-                
-                if (year > currentYear) {
-                    logger.debug("DEBUG: Journal reference [{}] year {} > {}", refNum, year, currentYear);
-                    results.add(Issue.newBuilder()
-                            .setCode("ERR_REF_JOURNAL_YEAR_EXCEED")
-                            .setMessage("参考文献 [" + refNum + "] 年份超出范围：" + year + " > " + currentYear)
-                            .setSectionId(0)
-                            .setSeverity(Severity.HIGH)
-                            .setSuggestion("请检查年份是否正确")
-                            .setOriginalSnippet(rawText.length() > 150 ? rawText.substring(0, 150) + "..." : rawText)
-                            .build());
-                }
+                year = Integer.parseInt(yearMatcher.group(1));
             } catch (NumberFormatException e) {
-                logger.warn("Unable to parse year");
+                logger.warn("Unable to parse publication year");
             }
+        }
+        int currentYear = 2026;
+
+        if (year != null && year > currentYear) {
+            logger.debug("DEBUG: Journal reference [{}] year {} > {}", refNum, year, currentYear);
+            results.add(Issue.newBuilder()
+                    .setCode("ERR_REF_JOURNAL_YEAR_EXCEED")
+                    .setMessage("参考文献 [" + refNum + "] 年份超出范围：" + year + " > " + currentYear)
+                    .setSectionId(0)
+                    .setSeverity(Severity.HIGH)
+                    .setSuggestion("请检查年份是否正确")
+                    .setOriginalSnippet(rawText.length() > 150 ? rawText.substring(0, 150) + "..." : rawText)
+                    .build());
         }
     }
 end
@@ -204,10 +211,10 @@ then
                     commaCount++;
                 }
             }
-            
+
             if (commaCount > 2) {
-                if (!authorPart.contains("等") && !authorPart.contains("et al.") && 
-                    !authorPart.contains("et al") && !authorPart.contains("等.")) {
+                if (!authorPart.contains("等") && !authorPart.contains("et al.") &&
+                        !authorPart.contains("et al") && !authorPart.contains("等.")) {
                     logger.debug("DEBUG: Journal reference [{}] multiple authors but no et al.", refNum);
                     results.add(Issue.newBuilder()
                             .setCode("ERR_REF_JOURNAL_MULTI_AUTHOR")
@@ -222,7 +229,6 @@ then
         }
     }
 end
-
 // Rule 7: Monograph [M] Format Check - Full-width Period Check
 rule "Monograph Reference Full-width Period Check"
 when 
@@ -271,14 +277,22 @@ then
     }
     
     if (refNum > 0) {
-        Pattern yearPattern = Pattern.compile("\\b(\\d{4})\\b");
-        Matcher yearMatcher = yearPattern.matcher(rawText);
-        
-        while (yearMatcher.find()) {
+        String window = rawText;
+        int typeIndex = rawText.indexOf("[M]");
+        if (typeIndex >= 0) {
+            window = rawText.substring(typeIndex + 3);
+        }
+        int doiIndex = window.toUpperCase().indexOf("DOI");
+        if (doiIndex >= 0) {
+            window = window.substring(0, doiIndex);
+        }
+
+        Matcher yearMatcher = Pattern.compile("(?<!\\d)(\\d{4})(?!\\d)").matcher(window);
+        if (yearMatcher.find()) {
             try {
                 int year = Integer.parseInt(yearMatcher.group(1));
                 int currentYear = 2026;
-                
+
                 if (year > currentYear) {
                     logger.debug("DEBUG: Monograph reference [{}] year {} > {}", refNum, year, currentYear);
                     results.add(Issue.newBuilder()
@@ -451,6 +465,20 @@ then
                     .build());
         }
     }
+
+    for (Integer refNum : existingRefNumbers) {
+        if (!citedNumbers.contains(refNum)) {
+            logger.debug("DEBUG: Found unused reference [{}]", refNum);
+            results.add(Issue.newBuilder()
+                    .setCode("WARN_REF_UNUSED")
+                    .setMessage("参考文献 [" + refNum + "] 未在正文中被引用")
+                    .setSectionId(0)
+                    .setSeverity(Severity.LOW)
+                    .setSuggestion("请删除未使用的参考文献，或在正文中补充引用")
+                    .setOriginalSnippet("")
+                    .build());
+        }
+    }
 end
 
 // Rule 13: Journal [J] Format Check - Year Too Early
@@ -471,13 +499,21 @@ then
     }
     
     if (refNum > 0) {
-        Pattern yearPattern = Pattern.compile("\\b(\\d{4})\\b");
-        Matcher yearMatcher = yearPattern.matcher(rawText);
-        
-        while (yearMatcher.find()) {
+        String window = rawText;
+        int typeIndex = rawText.indexOf("[J]");
+        if (typeIndex >= 0) {
+            window = rawText.substring(typeIndex + 3);
+        }
+        int doiIndex = window.toUpperCase().indexOf("DOI");
+        if (doiIndex >= 0) {
+            window = window.substring(0, doiIndex);
+        }
+
+        Matcher yearMatcher = Pattern.compile("(?<!\\d)(\\d{4})(?!\\d)").matcher(window);
+        if (yearMatcher.find()) {
             try {
                 int year = Integer.parseInt(yearMatcher.group(1));
-                
+
                 if (year < 1900) {
                     logger.debug("DEBUG: Journal reference [{}] year {} < 1900", refNum, year);
                     results.add(Issue.newBuilder()
@@ -514,13 +550,21 @@ then
     }
     
     if (refNum > 0) {
-        Pattern yearPattern = Pattern.compile("\\b(\\d{4})\\b");
-        Matcher yearMatcher = yearPattern.matcher(rawText);
-        
-        while (yearMatcher.find()) {
+        String window = rawText;
+        int typeIndex = rawText.indexOf("[M]");
+        if (typeIndex >= 0) {
+            window = rawText.substring(typeIndex + 3);
+        }
+        int doiIndex = window.toUpperCase().indexOf("DOI");
+        if (doiIndex >= 0) {
+            window = window.substring(0, doiIndex);
+        }
+
+        Matcher yearMatcher = Pattern.compile("(?<!\\d)(\\d{4})(?!\\d)").matcher(window);
+        if (yearMatcher.find()) {
             try {
                 int year = Integer.parseInt(yearMatcher.group(1));
-                
+
                 if (year < 1900) {
                     logger.debug("DEBUG: Monograph reference [{}] year {} < 1900", refNum, year);
                     results.add(Issue.newBuilder()
@@ -588,26 +632,28 @@ then
     }
     
     if (refNum > 0) {
-        // Only check two-digit year after comma
-        Pattern twoDigitYearPattern = Pattern.compile(",\\s*(\\d{2})\\s*,");
-        Matcher matcher = twoDigitYearPattern.matcher(rawText);
-        
+        String window = rawText;
+        int typeIndex = rawText.indexOf("[J]");
+        if (typeIndex >= 0) {
+            window = rawText.substring(typeIndex + 3);
+        }
+        int doiIndex = window.toUpperCase().indexOf("DOI");
+        if (doiIndex >= 0) {
+            window = window.substring(0, doiIndex);
+        }
+
+        Matcher matcher = Pattern.compile("(?<!\\d)(?:,|，|\\.)\\s*(\\d{2})(?=\\s*(?:,|，|\\.|$))").matcher(window);
         if (matcher.find()) {
             String twoDigit = matcher.group(1);
-            try {
-                int year = Integer.parseInt(twoDigit);
-                logger.debug("DEBUG: Journal reference [{}] year is two digits {}", refNum, twoDigit);
-                results.add(Issue.newBuilder()
-                        .setCode("ERR_REF_JOURNAL_YEAR_TWO_DIGIT")
-                        .setMessage("参考文献 [" + refNum + "] 年份格式错误：年份应为四位数字，而不是两位数字 " + twoDigit)
-                        .setSectionId(0)
-                        .setSeverity(Severity.MEDIUM)
-                        .setSuggestion("请将两位年份改为四位年份")
-                        .setOriginalSnippet(rawText.length() > 150 ? rawText.substring(0, 150) + "..." : rawText)
-                        .build());
-            } catch (NumberFormatException e) {
-                logger.warn("Unable to parse year");
-            }
+            logger.debug("DEBUG: Journal reference [{}] year is two digits", refNum);
+            results.add(Issue.newBuilder()
+                    .setCode("ERR_REF_JOURNAL_YEAR_TWO_DIGIT")
+                    .setMessage("参考文献 [" + refNum + "] 年份格式错误：年份应为四位数字，而不是两位数字")
+                    .setSectionId(0)
+                    .setSeverity(Severity.MEDIUM)
+                    .setSuggestion("请将两位年份改为四位年份")
+                    .setOriginalSnippet(rawText.length() > 150 ? rawText.substring(0, 150) + "..." : rawText)
+                    .build());
         }
     }
 end
@@ -630,14 +676,21 @@ then
     }
     
     if (refNum > 0) {
-        // Only check two-digit year after comma or at the end
-        Pattern twoDigitYearPattern = Pattern.compile(",\\s*(\\d{2})\\s*[,.]$");
-        Matcher matcher = twoDigitYearPattern.matcher(rawText);
-        
+        String window = rawText;
+        int typeIndex = rawText.indexOf("[M]");
+        if (typeIndex >= 0) {
+            window = rawText.substring(typeIndex + 3);
+        }
+        int doiIndex = window.toUpperCase().indexOf("DOI");
+        if (doiIndex >= 0) {
+            window = window.substring(0, doiIndex);
+        }
+
+        Matcher matcher = Pattern.compile("(?<!\\d)(?:,|，|\\.)\\s*(\\d{2})(?=\\s*(?:,|，|\\.|$))").matcher(window);
         if (matcher.find()) {
             String twoDigit = matcher.group(1);
             try {
-                int year = Integer.parseInt(twoDigit);
+                Integer.parseInt(twoDigit);
                 logger.debug("DEBUG: Monograph reference [{}] year is two digits {}", refNum, twoDigit);
                 results.add(Issue.newBuilder()
                         .setCode("ERR_REF_MONO_YEAR_TWO_DIGIT")
@@ -673,9 +726,8 @@ then
     
     if (refNum > 0) {
         int typeIndex = rawText.indexOf("[J]");
-        if (typeIndex > 0) {
+        if (refNum > 0) {
             String beforeType = rawText.substring(0, typeIndex);
-            // Check if no author (i.e. no period before [J] or insufficient text)
             if (!beforeType.contains(".") || beforeType.trim().length() < 3) {
                 logger.debug("DEBUG: Journal reference [{}] missing author", refNum);
                 results.add(Issue.newBuilder()
@@ -683,7 +735,7 @@ then
                         .setMessage("参考文献 [" + refNum + "] 期刊格式错误：缺少作者信息")
                         .setSectionId(0)
                         .setSeverity(Severity.HIGH)
-                        .setSuggestion("请补充作者信息，格式如：作者. 题名. 期刊名.")
+                        .setSuggestion("请补充作者信息，格式如：作者. 题名. 期刊名, 年份.")
                         .setOriginalSnippet(rawText.length() > 150 ? rawText.substring(0, 150) + "..." : rawText)
                         .build());
             }
@@ -707,12 +759,11 @@ then
     } catch (Exception e) {
         logger.warn("Unable to parse reference number");
     }
-    
+
     if (refNum > 0) {
         int typeIndex = rawText.indexOf("[M]");
         if (typeIndex > 0) {
             String beforeType = rawText.substring(0, typeIndex);
-            // Check if no author (i.e. no period before [M] or insufficient text)
             if (!beforeType.contains(".") || beforeType.trim().length() < 3) {
                 logger.debug("DEBUG: Monograph reference [{}] missing author", refNum);
                 results.add(Issue.newBuilder()
@@ -720,65 +771,13 @@ then
                         .setMessage("参考文献 [" + refNum + "] 专著格式错误：缺少作者信息")
                         .setSectionId(0)
                         .setSeverity(Severity.HIGH)
-                        .setSuggestion("请补充作者信息，格式如：作者. 书名. 出版地: 出版者.")
+                        .setSuggestion("请补充作者信息，格式如：作者. 书名. 出版地: 出版者, 年份.")
                         .setOriginalSnippet(rawText.length() > 150 ? rawText.substring(0, 150) + "..." : rawText)
                         .build());
             }
         }
     }
 end
-
-
-// Rule 20: Check Unused References
-rule "Check Unused References"
-when 
-    $data: ParsedData()
-then
-    Set<Integer> citedNumbers = new HashSet<>();
-    Set<Integer> existingRefNumbers = new HashSet<>();
-    
-    // Extract all citations in the main text
-    for (Section section : $data.getSectionsList()) {
-        Pattern citationPattern = Pattern.compile("\\[(\\d+)\\]");
-        Matcher matcher = citationPattern.matcher(section.getText());
-        while (matcher.find()) {
-            try {
-                citedNumbers.add(Integer.parseInt(matcher.group(1)));
-            } catch (NumberFormatException e) {
-                logger.warn("Unable to parse citation number");
-            }
-        }
-    }
-    
-    // Extract all numbers in the reference list
-    for (Reference ref : $data.getReferencesList()) {
-        String refId = ref.getRefId();
-        if (refId != null && !refId.isEmpty()) {
-            try {
-                String cleaned = refId.replaceAll("\\[|\\]", "").trim();
-                existingRefNumbers.add(Integer.parseInt(cleaned));
-            } catch (NumberFormatException e) {
-                logger.warn("Unable to parse reference number");
-            }
-        }
-    }
-    
-    // Check for unused references
-    for (Integer refNum : existingRefNumbers) {
-        if (!citedNumbers.contains(refNum)) {
-            logger.debug("DEBUG: Found unused reference [{}]", refNum);
-            results.add(Issue.newBuilder()
-                    .setCode("WARN_REF_UNUSED")
-                    .setMessage("参考文献 [" + refNum + "] 未在正文中被引用")
-                    .setSectionId(0)
-                    .setSeverity(Severity.LOW)
-                    .setSuggestion("请删除未使用的参考文献，或在正文中补充引用")
-                    .setOriginalSnippet("")
-                    .build());
-        }
-    }
-end
-
 
 // ==================== New Rules: Check Required Fields ====================
 
@@ -806,7 +805,7 @@ then
                 .setMessage("参考文献 [" + refNum + "] 专著格式错误：缺少出版地")
                 .setSectionId(0)
                 .setSeverity(Severity.HIGH)
-                .setSuggestion("请补充出版地信息，格式如：出版地:")
+                .setSuggestion("请补充出版地信息，格式如：出版地: 出版者")
                 .setOriginalSnippet(rawText.length() > 150 ? rawText.substring(0, 150) + "..." : rawText)
                 .build());
     }

@@ -26,6 +26,7 @@ public class EngineApplication {
         String grpcPort = context.getEnvironment().getProperty("ENGINE_JAVA_GRPC_PORT", "9191");
 
         logger.info("AI Auditor Engine-Java started successfully!");
+        logger.info("java engine listening on 127.0.0.1:{}", httpPort);
         logger.info("HTTP Service: http://localhost:{}", httpPort);
         logger.info("gRPC Service: localhost:{}", grpcPort);
     }

@@ -12,6 +12,7 @@ from .engine import (
     detect_reference_entries,
     extract_text_from_parsed_data,
     normalize_java_audit_response,
+    review_document,
 )
 
 __all__ = [
@@ -28,4 +29,5 @@ __all__ = [
     "detect_reference_entries",
     "extract_text_from_parsed_data",
     "normalize_java_audit_response",
+    "review_document",
 ]

@@ -65,7 +65,7 @@ public class ReferenceCheckerTest {
                         .build())
                 .addReferences(Reference.newBuilder()
                         .setRefId("[1]")
-                        .setRawText("Smith, J. Research Paper. Journal, 2023.")
+                        .setRawText("张三, 李四. 论文题名[J]. 期刊名, 2023, 10(2): 1-10.")
                         .setIsValidFormat(true)
                         .build())
                 .build();
@@ -93,12 +93,12 @@ public class ReferenceCheckerTest {
                         .build())
                 .addReferences(Reference.newBuilder()
                         .setRefId("[1]")
-                        .setRawText("Author1. Title1. Journal1, 2023.")
+                        .setRawText("张三, 李四. 论文题名[J]. 期刊名, 2023, 10(2): 1-10.")
                         .setIsValidFormat(true)
                         .build())
                 .addReferences(Reference.newBuilder()
                         .setRefId("[2]")
-                        .setRawText("Author2. Title2. Journal2, 2023.")
+                        .setRawText("王五, 赵六. 论文题名[J]. 期刊名, 2022, 8(1): 20-28.")
                         .setIsValidFormat(true)
                         .build())
                 .build();
@@ -155,6 +155,39 @@ public class ReferenceCheckerTest {
         }
     }
 
+    @Test
+    public void testCheckReferencesIgnoresDoiDigitsWhenExtractingYear() {
+        ParsedData data = ParsedData.newBuilder()
+                .setDocId("test-doc")
+                .setMetadata(DocumentMetadata.newBuilder()
+                        .setTitle("Test Document")
+                        .setPageCount(10)
+                        .build())
+                .addReferences(Reference.newBuilder()
+                        .setRefId("[1]")
+                        .setRawText("张三, 李四. 论文题名[J]. 期刊名, 2017, 35(6):18-21,25. DOI:10.3969/j.issn.1001-2257.2017.06.004.")
+                        .setIsValidFormat(true)
+                        .build())
+                .addReferences(Reference.newBuilder()
+                        .setRefId("[2]")
+                        .setRawText("张三, 李四. 书名[M]. 北京: 出版社, 2020. DOI:10.1234/abcd.2020.01.")
+                        .setIsValidFormat(true)
+                        .build())
+                .build();
+
+        List<Issue> issues = referenceChecker.checkReferences(data);
+
+        assertNotNull(issues);
+        assertFalse(issues.stream().anyMatch(issue ->
+                "ERR_REF_JOURNAL_YEAR_EXCEED".equals(issue.getCode())
+                        || "ERR_REF_JOURNAL_YEAR_EARLY".equals(issue.getCode())
+                        || "ERR_REF_MONO_YEAR_EXCEED".equals(issue.getCode())
+                        || "ERR_REF_MONO_YEAR_EARLY".equals(issue.getCode())
+                        || "ERR_REF_JOURNAL_YEAR_TWO_DIGIT".equals(issue.getCode())
+                        || "ERR_REF_MONO_YEAR_TWO_DIGIT".equals(issue.getCode())),
+                "DOI digits should not be treated as publication years");
+    }
+
     private ParsedData createValidParsedDataWithReferences() {
         return ParsedData.newBuilder()
                 .setDocId("test-doc")
@@ -170,7 +203,7 @@ public class ReferenceCheckerTest {
                         .build())
                 .addReferences(Reference.newBuilder()
                         .setRefId("[1]")
-                        .setRawText("Smith, J. Research Paper. Journal, 2023.")
+                        .setRawText("张三, 李四. 论文题名[J]. 期刊名, 2023, 10(2): 1-10.")
                         .setIsValidFormat(true)
                         .build())
                 .build();
