@@ -8,6 +8,11 @@ sys.path.insert(0, str(pathlib.Path(__file__).resolve().parents[1]))
 from python_service.paper_audit.services.workflow import langgraph
 
 
+@pytest.fixture(autouse=True)
+def _force_local_backend(monkeypatch):
+    monkeypatch.setattr(langgraph.settings, "RULE_AUDIT_BACKEND", "local")
+
+
 class FakeTextClient:
     async def review_chunk(
         self, text, *, section_id=None, strictness=3, focus_areas=None
@@ -281,3 +286,182 @@ async def test_review_document_uses_table_prompt(monkeypatch):
     assert table_review["table_issues"][0]["field_name"] == "关键词"
     assert len(table_review["row_reviews"]) == 2
     assert table_review["row_reviews"][0]["row_index"] == 1
+
+
+@pytest.mark.asyncio
+async def test_review_document_routes_to_java_http(monkeypatch):
+    monkeypatch.setattr(langgraph.settings, "RULE_AUDIT_BACKEND", "java_http")
+
+    called = {"value": False}
+
+    async def fake_review_document_via_rules(parsed_data, source_file=None):
+        called["value"] = True
+        return {
+            "backend": "java_http",
+            "java_review": {"status": "ok"},
+            "chunks": [],
+            "chunk_reviews": [],
+            "section_reviews": [],
+            "reference_verification": [],
+            "consistency_issues": [],
+            "summary": {},
+        }
+
+    monkeypatch.setattr(
+        langgraph, "review_document_via_rules", fake_review_document_via_rules
+    )
+
+    result = await langgraph.review_document({"sections": []})
+
+    assert called["value"] is True
+    assert result["backend"] == "java_http"
+
+
+@pytest.mark.asyncio
+async def test_review_document_hybrid_filters_java_reviewed_sections(monkeypatch):
+    monkeypatch.setattr(langgraph.settings, "RULE_AUDIT_BACKEND", "hybrid")
+
+    async def fake_review_document_java_http(parsed_data, source_file=None):
+        return {
+            "backend": "java_http",
+            "java_review": {"issues": []},
+            "chunks": [
+                {"section_id": 1, "text": "java section"},
+                {"section_id": 2, "text": "ai section"},
+            ],
+            "chunk_reviews": [
+                {
+                    "section_id": 1,
+                    "kind": "section",
+                    "text": "java section",
+                    "is_table": False,
+                    "issues": [
+                        {
+                            "issue_type": "format",
+                            "severity": 3,
+                            "message": "java issue",
+                            "suggestion": "fix",
+                            "original": "java section",
+                            "position": {"section_id": 1},
+                        }
+                    ],
+                    "issue_count": 1,
+                    "backend": "java_http",
+                    "java_issues": [],
+                }
+            ],
+            "section_reviews": [
+                {
+                    "section_id": 1,
+                    "kind": "section",
+                    "text": "java section",
+                    "is_table": False,
+                    "issues": [
+                        {
+                            "issue_type": "format",
+                            "severity": 3,
+                            "message": "java issue",
+                            "suggestion": "fix",
+                            "original": "java section",
+                            "position": {"section_id": 1},
+                        }
+                    ],
+                    "issue_count": 1,
+                    "backend": "java_http",
+                    "java_issues": [],
+                }
+            ],
+            "reference_verification": [],
+            "consistency_issues": [],
+            "summary": {
+                "chunk_count": 2,
+                "section_count": 1,
+                "reference_count": 0,
+                "chunk_issue_count": 1,
+                "consistency_issue_count": 0,
+                "java_issue_count": 1,
+                "java_score_impact": 0,
+            },
+        }
+
+    async def fake_review_document_local(parsed_data, source_file=None):
+        assert [section["id"] for section in parsed_data["sections"]] == [2]
+        return {
+            "backend": "qwen",
+            "chunks": [{"section_id": 2, "text": "ai section"}],
+            "chunk_reviews": [
+                {
+                    "section_id": 2,
+                    "kind": "section",
+                    "text": "ai section",
+                    "is_table": False,
+                    "issues": [
+                        {
+                            "issue_type": "logic",
+                            "severity": 2,
+                            "message": "ai issue",
+                            "suggestion": "fix",
+                            "original": "ai section",
+                            "position": {"section_id": 2},
+                        }
+                    ],
+                    "issue_count": 1,
+                    "backend": "qwen",
+                    "local_issues": [],
+                    "llm_issues": [],
+                }
+            ],
+            "section_reviews": [
+                {
+                    "section_id": 2,
+                    "kind": "section",
+                    "text": "ai section",
+                    "is_table": False,
+                    "issues": [
+                        {
+                            "issue_type": "logic",
+                            "severity": 2,
+                            "message": "ai issue",
+                            "suggestion": "fix",
+                            "original": "ai section",
+                            "position": {"section_id": 2},
+                        }
+                    ],
+                    "issue_count": 1,
+                    "backend": "qwen",
+                    "local_issues": [],
+                    "llm_issues": [],
+                }
+            ],
+            "reference_verification": [],
+            "consistency_issues": [],
+            "summary": {
+                "chunk_count": 1,
+                "section_count": 1,
+                "reference_count": 0,
+                "chunk_issue_count": 1,
+                "consistency_issue_count": 0,
+                "qwen_worker_count": 1,
+                "qwen_batch_size": 1,
+            },
+        }
+
+    monkeypatch.setattr(langgraph, "_review_document_java_http", fake_review_document_java_http)
+    monkeypatch.setattr(langgraph, "_review_document_local", fake_review_document_local)
+    monkeypatch.setattr(langgraph, "check_consistency_rules", lambda parsed_data, source_file=None: [])
+
+    parsed_data = {
+        "sections": [
+            {"id": 1, "raw_text": "java section"},
+            {"id": 2, "raw_text": "ai section"},
+        ]
+    }
+
+    result = await langgraph.review_document(parsed_data)
+
+    assert result["backend"] == "hybrid"
+    assert result["java_section_reviews"][0]["section_id"] == 1
+    assert result["ai_section_reviews"][0]["section_id"] == 2
+    assert [item["section_id"] for item in result["section_reviews"]] == [1, 2]
+    assert result["summary"]["java_issue_count"] == 1
+    assert result["summary"]["ai_chunk_issue_count"] == 1
