@@ -61,6 +61,32 @@ _REFERENCE_FORMAT_PATTERNS = (
     ),
 )
 
+_STRUCTURAL_LABEL_HINTS = (
+    "UDC",
+    "ISBN",
+    "ISSN",
+    "Abstract",
+    "Keywords",
+    "Classification",
+    "中图分类号",
+    "分类号",
+    "学校代码",
+    "学号",
+    "姓名",
+    "专业",
+    "班级",
+    "指导教师",
+    "答辩委员会主席",
+    "阅人",
+    "评阅人",
+    "作者",
+    "培养单位",
+)
+
+
+def _looks_like_structural_label_block(text: str) -> bool:
+    return any(hint in text for hint in _STRUCTURAL_LABEL_HINTS)
+
 
 def check_text_rules(
     text: str, focus_areas: Iterable[str] | None = None
@@ -98,7 +124,9 @@ def check_text_rules(
                         rule_id=rule_id,
                     )
 
-        if re.search(r"[A-Za-z]+[，。；：、]", text):
+        if not _looks_like_structural_label_block(text) and re.search(
+            r"[A-Za-z]+[，。；：、]", text
+        ):
             issues.append(
                 RuleIssue(
                     issue_type="format",

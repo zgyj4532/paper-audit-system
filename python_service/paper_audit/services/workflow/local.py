@@ -127,14 +127,12 @@ async def _review_chunk_with_qwen(
         issues = qwen_result.get("issues", []) if isinstance(qwen_result, dict) else []
         return [issue for issue in issues if isinstance(issue, dict)]
     except Exception as exc:
-        return [
-            {
-                "issue_type": "review_error",
-                "severity": 1,
-                "message": str(exc),
-                "suggestion": "retry later",
-            }
-        ]
+        logger.warning(
+            "Qwen chunk review failed for section %s: %s",
+            chunk.get("section_id"),
+            exc,
+        )
+        return []
 
 
 async def _review_table_with_qwen(
@@ -166,25 +164,13 @@ async def _review_table_with_qwen(
             "raw": qwen_result.get("raw", {}) if isinstance(qwen_result, dict) else {},
         }
     except Exception as exc:
+        logger.warning(
+            "Qwen table review failed for section %s: %s",
+            table_rows[0].get("section_id") if table_rows else None,
+            exc,
+        )
         return {
-            "table_issues": [
-                {
-                    "issue_type": "review_error",
-                    "severity": 1,
-                    "field_name": "table",
-                    "field_value": "",
-                    "position": {
-                        "section_id": table_rows[0].get("section_id") if table_rows else None,
-                        "table_index": table_rows[0].get("table_index") if table_rows else None,
-                        "row": table_rows[0].get("row_index") if table_rows else None,
-                        "col": 1,
-                    },
-                    "message": str(exc),
-                    "suggestion": "retry later",
-                    "rule_id": "TABLE-REVIEW-ERROR",
-                    "auto_fixable": False,
-                }
-            ],
+            "table_issues": [],
             "field_summary": {},
             "critical_gaps": [],
             "backend": "qwen",

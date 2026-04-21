@@ -124,6 +124,7 @@ class QwenClient:
         headers = {"Authorization": f"Bearer {self.api_key}"}
 
         last_error: Exception | None = None
+        attempt_errors: List[str] = []
         async with httpx.AsyncClient(timeout=self.timeout) as client:
             for api_url in self._candidate_urls:
                 try:
@@ -140,8 +141,12 @@ class QwenClient:
                     }
                 except Exception as exc:
                     last_error = exc
+                    attempt_errors.append(f"{api_url}: {exc}")
 
-        raise RuntimeError(f"Qwen request failed: {last_error}")
+        error_detail = " | ".join(attempt_errors) if attempt_errors else str(last_error)
+        raise RuntimeError(
+            f"Qwen request failed after trying {len(self._candidate_urls)} endpoint(s): {error_detail}"
+        )
 
     async def ping(self) -> Dict[str, Any]:
         result = await self.chat(
