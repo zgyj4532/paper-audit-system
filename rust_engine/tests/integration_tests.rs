@@ -340,6 +340,9 @@ async fn test_parse_exposes_page_and_table_positions() {
         .and_then(|value| value.as_array())
         .unwrap();
     assert!(sections.iter().any(|section| {
+        section.get("text").and_then(|value| value.as_str()) == Some("第一段")
+    }));
+    assert!(sections.iter().any(|section| {
         section
             .get("position")
             .and_then(|position| position.get("page_start"))
@@ -406,15 +409,31 @@ async fn test_parse_extracts_references() {
         .and_then(|value| value.as_array())
         .expect("references should be present");
     assert_eq!(references.len(), 2);
-    assert_eq!(references[0].get("index").and_then(|value| value.as_u64()), Some(1));
-    assert_eq!(references[0].get("ref_id").and_then(|value| value.as_str()), Some("[1]"));
+    assert_eq!(
+        references[0].get("index").and_then(|value| value.as_u64()),
+        Some(1)
+    );
+    assert_eq!(
+        references[0].get("ref_id").and_then(|value| value.as_str()),
+        Some("[1]")
+    );
+    assert_eq!(
+        references[0].get("text").and_then(|value| value.as_str()),
+        Some("董蔼莹. 基于VR技术的园区全景漫游系统设计与实现[D]. 广东:华南农业大学,2019.")
+    );
     assert!(references[0]
         .get("raw_text")
         .and_then(|value| value.as_str())
         .unwrap()
         .contains("董蔼莹"));
-    assert_eq!(references[1].get("index").and_then(|value| value.as_u64()), Some(2));
-    assert_eq!(references[1].get("ref_id").and_then(|value| value.as_str()), Some("[2]"));
+    assert_eq!(
+        references[1].get("index").and_then(|value| value.as_u64()),
+        Some(2)
+    );
+    assert_eq!(
+        references[1].get("ref_id").and_then(|value| value.as_str()),
+        Some("[2]")
+    );
 }
 
 #[tokio::test]
@@ -443,6 +462,12 @@ async fn test_parse_stops_references_on_heading_format() {
         .and_then(|value| value.as_array())
         .expect("references should be present");
     assert_eq!(references.len(), 2);
-    assert_eq!(references[0].get("ref_id").and_then(|value| value.as_str()), Some("[1]"));
-    assert_eq!(references[1].get("ref_id").and_then(|value| value.as_str()), Some("[2]"));
+    assert_eq!(
+        references[0].get("ref_id").and_then(|value| value.as_str()),
+        Some("[1]")
+    );
+    assert_eq!(
+        references[1].get("ref_id").and_then(|value| value.as_str()),
+        Some("[2]")
+    );
 }

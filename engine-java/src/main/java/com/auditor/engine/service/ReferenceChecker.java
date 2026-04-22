@@ -96,6 +96,11 @@ public class ReferenceChecker {
 
             // Fire all rules
             int firedRules = kieSession.fireAllRules();
+            if (!issues.isEmpty()) {
+                for (Issue issue : issues) {
+                    logger.info("Reference check issue: code={}, message={}", issue.getCode(), issue.getMessage());
+                }
+            }
             logger.info("Reference checking completed, fired {} rules, found {} issues",
                     firedRules, issues.size());
 

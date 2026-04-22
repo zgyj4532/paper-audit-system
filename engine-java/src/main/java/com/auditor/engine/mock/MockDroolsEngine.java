@@ -19,102 +19,211 @@ public class MockDroolsEngine {
         if (data == null || data.getSectionsList().isEmpty()) {
             return issues;
         }
-        
-        // Rule 1: Level 1 headings must use SimHei font
+
+        Deque<Integer> headingStack = new ArrayDeque<>();
+
         for (Section section : data.getSectionsList()) {
-            if ("heading".equals(section.getType()) && section.getLevel() == 1) {
-                String fontFamily = section.getPropsMap().get("font-family");
-                if (fontFamily == null || (!fontFamily.contains("黑体") && !fontFamily.contains("SimHei") && !fontFamily.equals("黑体"))) {
+            String lineHeight = firstNonBlank(
+                    section.getPropsMap().get("line-height"),
+                    section.getPropsMap().get("line_spacing"),
+                    section.getPropsMap().get("line-spacing"));
+            if (lineHeight != null) {
+                try {
+                    double parsedLineHeight = Double.parseDouble(lineHeight);
+                    if (Math.abs(parsedLineHeight - 1.5) > 0.05) {
+                        issues.add(Issue.newBuilder()
+                                .setCode("FMT_LINE_HEIGHT_001")
+                                .setMessage("行距不应偏离 1.5 倍")
+                                .setSectionId(section.getSectionId())
+                                .setSeverity(Severity.MEDIUM)
+                                .build());
+                    }
+                } catch (NumberFormatException ignored) {
+                }
+            }
+
+            if ("heading".equals(section.getType())) {
+                int level = section.getLevel();
+                if (!headingStack.isEmpty() && level > headingStack.peek() + 1) {
                     issues.add(Issue.newBuilder()
-                            .setCode("ERR_FONT_001")
+                            .setCode("FMT_HEADING_LEVEL_JUMP")
+                            .setMessage("标题层级跳跃：从 level " + headingStack.peek() + " 到 level " + level)
+                            .setSectionId(section.getSectionId())
+                            .setSeverity(Severity.HIGH)
+                            .build());
+                }
+                while (!headingStack.isEmpty() && headingStack.peek() >= level) {
+                    headingStack.pop();
+                }
+                headingStack.push(level);
+            }
+
+            if ("heading".equals(section.getType()) && section.getLevel() == 1) {
+                String fontFamily = firstNonBlank(section.getPropsMap().get("font-family"), section.getPropsMap().get("font_family"));
+                if (fontFamily == null || (!fontFamily.contains("黑体") && !fontFamily.contains("SimHei") && !fontFamily.contains("Hei") && !fontFamily.contains("hei"))) {
+                    issues.add(Issue.newBuilder()
+                            .setCode("FMT_HEADING_FONT_001")
                             .setMessage("一级标题必须使用黑体")
+                            .setSectionId(section.getSectionId())
+                            .setSeverity(Severity.HIGH)
+                            .build());
+                }
+
+                String fontSize = firstNonBlank(section.getPropsMap().get("font-size"), section.getPropsMap().get("font_size"));
+                if (fontSize != null) {
+                    try {
+                        double size = Double.parseDouble(fontSize.replaceAll("[^0-9.]", ""));
+                        if (Math.abs(size - 18) > 0.5) {
+                            issues.add(Issue.newBuilder()
+                                    .setCode("FMT_HEADING_SIZE_001")
+                                    .setMessage("一级标题字号应为 18pt")
+                                    .setSectionId(section.getSectionId())
+                                    .setSeverity(Severity.MEDIUM)
+                                    .build());
+                        }
+                    } catch (NumberFormatException ignored) {
+                    }
+                }
+            }
+
+            if ("heading".equals(section.getType()) && section.getLevel() == 2) {
+                String fontFamily = firstNonBlank(section.getPropsMap().get("font-family"), section.getPropsMap().get("font_family"));
+                if (fontFamily == null || (!fontFamily.contains("黑体") && !fontFamily.contains("SimHei") && !fontFamily.contains("Hei") && !fontFamily.contains("hei"))) {
+                    issues.add(Issue.newBuilder()
+                            .setCode("FMT_HEADING_FONT_002")
+                            .setMessage("二级标题必须使用黑体")
+                            .setSectionId(section.getSectionId())
+                            .setSeverity(Severity.HIGH)
+                            .build());
+                }
+
+                String fontSize = firstNonBlank(section.getPropsMap().get("font-size"), section.getPropsMap().get("font_size"));
+                if (fontSize != null) {
+                    try {
+                        double size = Double.parseDouble(fontSize.replaceAll("[^0-9.]", ""));
+                        if (Math.abs(size - 16) > 1) {
+                            issues.add(Issue.newBuilder()
+                                    .setCode("FMT_HEADING_SIZE_002")
+                                    .setMessage("二级标题字号应为 16pt")
+                                    .setSectionId(section.getSectionId())
+                                    .setSeverity(Severity.MEDIUM)
+                                    .build());
+                        }
+                    } catch (NumberFormatException ignored) {
+                    }
+                }
+            }
+
+            if ("heading".equals(section.getType()) && section.getLevel() == 3) {
+                String fontFamily = firstNonBlank(section.getPropsMap().get("font-family"), section.getPropsMap().get("font_family"));
+                if (fontFamily == null || (!fontFamily.contains("黑体") && !fontFamily.contains("SimHei") && !fontFamily.contains("Hei") && !fontFamily.contains("hei"))) {
+                    issues.add(Issue.newBuilder()
+                            .setCode("FMT_HEADING_FONT_003")
+                            .setMessage("三级标题必须使用黑体")
+                            .setSectionId(section.getSectionId())
+                            .setSeverity(Severity.MEDIUM)
+                            .build());
+                }
+
+                String fontSize = firstNonBlank(section.getPropsMap().get("font-size"), section.getPropsMap().get("font_size"));
+                if (fontSize != null) {
+                    try {
+                        double size = Double.parseDouble(fontSize.replaceAll("[^0-9.]", ""));
+                        if (Math.abs(size - 14) > 1) {
+                            issues.add(Issue.newBuilder()
+                                    .setCode("FMT_HEADING_SIZE_003")
+                                    .setMessage("三级标题字号应为 14pt")
+                                    .setSectionId(section.getSectionId())
+                                    .setSeverity(Severity.MEDIUM)
+                                    .build());
+                        }
+                    } catch (NumberFormatException ignored) {
+                    }
+                }
+            }
+
+            if ("paragraph".equals(section.getType())) {
+                String fontFamily = firstNonBlank(section.getPropsMap().get("font-family"), section.getPropsMap().get("font_family"));
+                if (fontFamily != null && !fontFamily.isEmpty()) {
+                    if (!fontFamily.contains("SimSun") && !fontFamily.contains("Sun") && !fontFamily.contains("song") && !fontFamily.contains("Song") && !fontFamily.contains("宋体") && !fontFamily.contains("仿宋")) {
+                        issues.add(Issue.newBuilder()
+                                .setCode("FMT_BODY_FONT_001")
+                                .setMessage("正文必须使用宋体/仿宋")
+                                .setSectionId(section.getSectionId())
+                                .setSeverity(Severity.MEDIUM)
+                                .build());
+                    }
+                }
+
+                String fontSize = firstNonBlank(section.getPropsMap().get("font-size"), section.getPropsMap().get("font_size"));
+                if (fontSize != null && !fontSize.isEmpty()) {
+                    try {
+                        double size = Double.parseDouble(fontSize.replaceAll("[^0-9.]", ""));
+                        if (Math.abs(size - 12) > 1) {
+                            issues.add(Issue.newBuilder()
+                                    .setCode("FMT_BODY_SIZE_001")
+                                    .setMessage("正文字号应为 12pt")
+                                    .setSectionId(section.getSectionId())
+                                    .setSeverity(Severity.MEDIUM)
+                                    .build());
+                        }
+                    } catch (NumberFormatException ignored) {
+                    }
+                }
+
+                String indent = firstNonBlank(section.getPropsMap().get("first_line_indent"), section.getPropsMap().get("first-line-indent"));
+                if (indent != null && !indent.isEmpty()) {
+                    try {
+                        double indentValue = Double.parseDouble(indent.replaceAll("[^0-9.]", ""));
+                        if (indentValue < 1) {
+                            issues.add(Issue.newBuilder()
+                                    .setCode("FMT_INDENT_001")
+                                    .setMessage("正文段落首行缩进不足")
+                                    .setSectionId(section.getSectionId())
+                                    .setSeverity(Severity.LOW)
+                                    .build());
+                        }
+                    } catch (NumberFormatException ignored) {
+                    }
+                }
+            }
+
+            if ("formula".equals(section.getType())) {
+                String alignment = firstNonBlank(section.getPropsMap().get("alignment"), section.getPropsMap().get("align"));
+                if (alignment == null || !"right".equalsIgnoreCase(alignment)) {
+                    issues.add(Issue.newBuilder()
+                            .setCode("FMT_FORMULA_ALIGNMENT")
+                            .setMessage("公式必须右对齐")
                             .setSectionId(section.getSectionId())
                             .setSeverity(Severity.MEDIUM)
                             .build());
                 }
             }
-            
-            // Rule 2: Level 1 heading font size should be between 14-20pt
-            if ("heading".equals(section.getType()) && section.getLevel() == 1) {
-                String fontSize = section.getPropsMap().get("font-size");
-                if (fontSize != null) {
-                    try {
-                        int size = Integer.parseInt(fontSize);
-                        if (size < 14 || size > 20) {
-                            issues.add(Issue.newBuilder()
-                                    .setCode("ERR_SIZE_001")
-                                    .setMessage("一级标题字号应在 14-20pt 之间")
-                                    .setSectionId(section.getSectionId())
-                                    .setSeverity(Severity.MEDIUM)
-                                    .build());
-                        }
-                    } catch (NumberFormatException e) {
-                        // Ignore unparseable font size
-                    }
-                }
-            }
-            
-            // Rule 3: Level 2 heading font size should be between 12-18pt
-            if ("heading".equals(section.getType()) && section.getLevel() == 2) {
-                String fontSize = section.getPropsMap().get("font-size");
-                if (fontSize != null) {
-                    try {
-                        int size = Integer.parseInt(fontSize);
-                        if (size < 12 || size > 18) {
-                            issues.add(Issue.newBuilder()
-                                    .setCode("ERR_SIZE_002")
-                                    .setMessage("二级标题字号应在 12-18pt 之间")
-                                    .setSectionId(section.getSectionId())
-                                    .setSeverity(Severity.LOW)
-                                    .build());
-                        }
-                    } catch (NumberFormatException e) {
-                        // Ignore
-                    }
-                }
-            }
-            
-            // Rule 4: Body text font size should be 12pt
-            if ("paragraph".equals(section.getType())) {
-                String fontSize = section.getPropsMap().get("font-size");
-                if (fontSize != null) {
-                    try {
-                        int size = Integer.parseInt(fontSize);
-                        if (size != 12) {
-                            issues.add(Issue.newBuilder()
-                                    .setCode("ERR_SIZE_003")
-                                    .setMessage("正文文字字号应为 12pt")
-                                    .setSectionId(section.getSectionId())
-                                    .setSeverity(Severity.LOW)
-                                    .build());
-                        }
-                    } catch (NumberFormatException e) {
-                        // Ignore
-                    }
-                }
-            }
-            
-            // Rule 9: Check line spacing - fixed logic, line spacing should be >= 1.5
-            String lineHeight = section.getPropsMap().get("line-height");
-            if (lineHeight != null && !lineHeight.isEmpty()) {
-                try {
-                    float lineHeightValue = Float.parseFloat(lineHeight);
-                    // Line spacing should not be less than 1.5, if less than 1.5 it's an issue
-                    if (lineHeightValue < 1.5) {
-                        issues.add(Issue.newBuilder()
-                                .setCode("FMT_LINE_SPACING_001")
-                                .setMessage("行距不应小于 1.5 倍")
-                                .setSectionId(section.getSectionId())
-                                .setSeverity(Severity.LOW)
-                                .build());
-                    }
-                } catch (NumberFormatException e) {
-                    // Ignore unparseable line spacing
+
+            if ("table".equals(section.getType())) {
+                String pageBreak = firstNonBlank(section.getPropsMap().get("page-break"), section.getPropsMap().get("page_break"));
+                String continueTableFlag = firstNonBlank(section.getPropsMap().get("continue-table-flag"), section.getPropsMap().get("continue_table_flag"));
+                if ("true".equalsIgnoreCase(pageBreak) && !"true".equalsIgnoreCase(continueTableFlag)) {
+                    issues.add(Issue.newBuilder()
+                            .setCode("FMT_TABLE_PAGE_BREAK")
+                            .setMessage("表格分页续表标记缺失")
+                            .setSectionId(section.getSectionId())
+                            .setSeverity(Severity.MEDIUM)
+                            .build());
                 }
             }
         }
         
         return issues;
+    }
+
+    private static String firstNonBlank(String... values) {
+        for (String value : values) {
+            if (value != null && !value.trim().isEmpty()) {
+                return value.trim();
+            }
+        }
+        return null;
     }
     
     /**

@@ -1,6 +1,7 @@
 mod api;
 mod document;
 mod format;
+mod sections;
 mod types;
 mod xml;
 
