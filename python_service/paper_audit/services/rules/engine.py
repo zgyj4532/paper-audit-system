@@ -170,8 +170,6 @@ def build_java_audit_request(
             request_sections.append(
                 {
                     "sectionId": _first_not_none(
-
-
                         section.get("sectionId"),
                         section.get("sectionID"),
                         section.get("section_id"),
@@ -251,14 +249,19 @@ async def audit_document_via_java_http(
                 logger.info(
                     "Java audit API completed: status_code=%s, issue_count=%s",
                     response.status_code,
-                    len(payload.get("issues", []))
-                    if isinstance(payload.get("issues"), list)
-                    else 0,
+                    (
+                        len(payload.get("issues", []))
+                        if isinstance(payload.get("issues"), list)
+                        else 0
+                    ),
                 )
                 return payload
             except Exception as exc:
                 last_error = exc
-                if attempt >= _JAVA_READY_RETRY_ATTEMPTS or not _should_retry_java_audit(exc):
+                if (
+                    attempt >= _JAVA_READY_RETRY_ATTEMPTS
+                    or not _should_retry_java_audit(exc)
+                ):
                     break
                 logger.warning(
                     "Java audit attempt %s failed, retrying after health check: %s",
@@ -313,7 +316,9 @@ def normalize_java_audit_response(
                     issue.get("originalSnippet") or issue.get("original_snippet")
                 ),
                 "rule_id": code,
-                "position": {"section_id": section_id} if section_id is not None else {},
+                "position": (
+                    {"section_id": section_id} if section_id is not None else {}
+                ),
                 "source": "java_http",
                 "java_issue": issue,
             }
@@ -417,7 +422,9 @@ async def review_document(
     except Exception as exc:
         logger.warning("Java HTTP audit failed, falling back to local rules: %s", exc)
         chunk_reviews = _build_local_chunk_reviews(parsed_data)
-        consistency_issues = check_consistency_rules(parsed_data, source_file=source_file)
+        consistency_issues = check_consistency_rules(
+            parsed_data, source_file=source_file
+        )
         references = detect_reference_entries(parsed_data)
         return {
             "backend": "local",

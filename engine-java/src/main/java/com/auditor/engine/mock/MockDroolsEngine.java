@@ -325,13 +325,11 @@ public class MockDroolsEngine {
         
         // Rule 3: Check required chapters
         String[] requiredChapters = {"摘要", "引言", "正文", "结论", "参考文献"};
-        int foundCount = 0;
         for (String required : requiredChapters) {
             boolean found = false;
             for (String chapter : chapters) {
                 if (chapter.contains(required)) {
                     found = true;
-                    foundCount++;
                     break;
                 }
             }

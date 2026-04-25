@@ -149,7 +149,9 @@ def _issue_label(issue: Dict[str, Any]) -> str:
     return ""
 
 
-def is_same_issue(left: Dict[str, Any], right: Dict[str, Any], tolerance: int = 3) -> bool:
+def is_same_issue(
+    left: Dict[str, Any], right: Dict[str, Any], tolerance: int = 3
+) -> bool:
     if left.get("issue_type") != right.get("issue_type"):
         return False
     if _issue_label(left) != _issue_label(right):
@@ -173,7 +175,9 @@ def dedupe_issues(issues: List[Dict[str, Any]]) -> List[Dict[str, Any]]:
         if not isinstance(issue, dict):
             continue
         signature = _issue_signature(issue)
-        if signature in seen or any(is_same_issue(existing, issue) for existing in deduped):
+        if signature in seen or any(
+            is_same_issue(existing, issue) for existing in deduped
+        ):
             continue
         seen.add(signature)
         deduped.append(issue)
@@ -209,7 +213,9 @@ def collect_java_blacklisted_section_ids(java_review: Dict[str, Any]) -> set[Any
                     if section_id is not None:
                         blacklisted.add(section_id)
 
-        raw_sections = raw_review.get("section_reviews") or raw_review.get("sectionReviews")
+        raw_sections = raw_review.get("section_reviews") or raw_review.get(
+            "sectionReviews"
+        )
         if isinstance(raw_sections, list):
             for item in raw_sections:
                 if isinstance(item, dict):
@@ -298,7 +304,9 @@ def merge_hybrid_reviews(
 
     combined_chunks = split_into_chunks(parsed_data)
     combined_issue_count = sum(
-        item.get("issue_count", 0) for item in combined_reviews if isinstance(item, dict)
+        item.get("issue_count", 0)
+        for item in combined_reviews
+        if isinstance(item, dict)
     )
 
     final_summary = dict(ai_review.get("summary", {}))
@@ -332,6 +340,8 @@ def merge_hybrid_reviews(
         "java_section_reviews": java_section_reviews,
         "ai_section_reviews": ai_section_reviews,
         "reference_verification": ai_review.get("reference_verification", []),
-        "consistency_issues": check_consistency_rules(parsed_data, source_file=source_file),
+        "consistency_issues": check_consistency_rules(
+            parsed_data, source_file=source_file
+        ),
         "summary": final_summary,
     }

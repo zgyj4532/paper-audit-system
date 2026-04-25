@@ -5,7 +5,7 @@ from typing import Any, Iterable
 from ._common import LLMRequest, calculate_temperature, normalize_focus_areas
 
 REVIEW_CHUNK_SYSTEM_PROMPT = (
-  "你是论文审查助手。你的唯一职责是识别学术文本中的规范问题，并以严格 JSON 返回结果。"
+    "你是论文审查助手。你的唯一职责是识别学术文本中的规范问题，并以严格 JSON 返回结果。"
     "不要输出解释、免责声明、Markdown、代码块或任何多余文本。"
     "示例仅用于格式参考，禁止在输出中复述、引用或改写示例内容。"
 )

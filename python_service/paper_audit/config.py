@@ -22,7 +22,9 @@ class Settings(BaseSettings):
     ENGINE_JAVA_HTTP_PORT: int = 8081
     ENGINE_JAVA_GRPC_PORT: int = 9191
     ENGINE_JAVA_BASE_URL: str = "http://127.0.0.1:8081"
-    ENGINE_JAVA_JAR_PATH: Path = Path("./engine-java/target/engine-java-0.1.0-SNAPSHOT.jar")
+    ENGINE_JAVA_JAR_PATH: Path = Path(
+        "./engine-java/target/engine-java-0.1.0-SNAPSHOT.jar"
+    )
     ENGINE_JAVA_MAIN_CLASS: str = "com.auditor.engine.EngineApplication"
     ENGINE_JAVA_START_MODE: str = "jar"
     ENGINE_JAVA_TIMEOUT_SECONDS: int = 60

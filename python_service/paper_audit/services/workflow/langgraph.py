@@ -3,7 +3,7 @@ from __future__ import annotations
 import logging
 from typing import Any, Dict, List, TypedDict
 
-from ...config import settings
+from ... import config as _config
 from ..llm import build_qwen_client, normalize_focus_areas
 from ..rules import (
     audit_document_via_java_http,
@@ -32,6 +32,7 @@ from .shared import (
 )
 
 logger = logging.getLogger(__name__)
+settings = _config.settings
 
 
 class AuditState(TypedDict, total=False):

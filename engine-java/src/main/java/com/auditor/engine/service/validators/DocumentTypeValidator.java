@@ -83,9 +83,6 @@ public class DocumentTypeValidator {
                 return issues;
             }
             
-            // Get required fields for this document type
-            String[] requiredFields = REQUIRED_FIELDS.get(docType);
-            
             // Check basic required fields
             if (title.isEmpty()) {
                 Issue issue = Issue.newBuilder()

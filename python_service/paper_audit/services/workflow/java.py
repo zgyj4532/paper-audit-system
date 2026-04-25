@@ -16,7 +16,9 @@ def _build_java_section_reviews(
     for issue in issues:
         if not isinstance(issue, dict):
             continue
-        position = issue.get("position") if isinstance(issue.get("position"), dict) else {}
+        position = (
+            issue.get("position") if isinstance(issue.get("position"), dict) else {}
+        )
         section_id = issue.get("section_id")
         if section_id is None and isinstance(position, dict):
             section_id = position.get("section_id")
@@ -89,7 +91,9 @@ async def review_document_java_http(
     chunks = split_chunks(parsed_data)
     java_response = await audit_java(parsed_data, source_file=source_file)
     normalized_java = normalize_java_response(java_response)
-    section_reviews = _build_java_section_reviews(parsed_data, normalized_java["issues"])
+    section_reviews = _build_java_section_reviews(
+        parsed_data, normalized_java["issues"]
+    )
 
     return {
         "backend": "java_http",

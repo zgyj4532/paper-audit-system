@@ -131,7 +131,9 @@ def start_java_process(skip_build: bool = False) -> Optional[subprocess.Popen]:
     if java_target == "run":
         maven_cmd = _resolve_maven_command()
         if maven_cmd is None:
-            logger.error("Maven executable not found when attempting to start Java engine")
+            logger.error(
+                "Maven executable not found when attempting to start Java engine"
+            )
             return None
 
         cmd = [*maven_cmd, "-q", "-DskipTests", "spring-boot:run"]
@@ -149,7 +151,9 @@ def start_java_process(skip_build: bool = False) -> Optional[subprocess.Popen]:
             return proc
         except FileNotFoundError:
             log_stream.close()
-            logger.exception("Maven executable not found when attempting to start Java engine")
+            logger.exception(
+                "Maven executable not found when attempting to start Java engine"
+            )
             return None
 
     jar = find_java_executable()

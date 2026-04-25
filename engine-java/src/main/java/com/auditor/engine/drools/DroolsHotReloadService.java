@@ -3,14 +3,11 @@ package com.auditor.engine.drools;
 import org.kie.api.KieServices;
 import org.kie.api.builder.*;
 import org.kie.api.runtime.KieContainer;
-import org.kie.api.runtime.KieSession;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 import org.springframework.stereotype.Service;
 
-import java.io.IOException;
 import java.nio.charset.StandardCharsets;
-import java.nio.file.*;
 import java.security.MessageDigest;
 import java.security.NoSuchAlgorithmException;
 import java.time.LocalDateTime;

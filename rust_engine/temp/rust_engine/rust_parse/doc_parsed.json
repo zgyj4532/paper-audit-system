@@ -71,7 +71,6 @@
       "xml_path": "/w:body/w:p[1]"
     }
   ],
-  "styles": null,
   "success": true,
   "temp_output_path": "./temp/rust_engine\\rust_parse\\doc_parsed.json"
 }

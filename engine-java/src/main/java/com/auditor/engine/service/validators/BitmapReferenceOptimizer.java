@@ -161,13 +161,13 @@ public class BitmapReferenceOptimizer {
         
         // Test HashSet method
         long hashSetStart = System.currentTimeMillis();
-        List<Issue> hashSetIssues = new ArrayList<>();
+        new ArrayList<>();
         // ... HashSet implementation ...
         long hashSetTime = System.currentTimeMillis() - hashSetStart;
         
         // Test bitmap method
         long bitmapStart = System.currentTimeMillis();
-        List<Issue> bitmapIssues = validateReferencesWithBitmap(data);
+        validateReferencesWithBitmap(data);
         long bitmapTime = System.currentTimeMillis() - bitmapStart;
         
         double improvement = (double) hashSetTime / bitmapTime;

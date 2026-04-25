@@ -2,9 +2,6 @@ package com.auditor.engine.service;
 
 import com.auditor.grpc.*;
 import org.junit.jupiter.api.Test;
-import org.slf4j.Logger;
-import org.slf4j.LoggerFactory;
-
 import java.io.PrintWriter;
 import java.nio.charset.StandardCharsets;
 import java.util.*;
@@ -17,7 +14,6 @@ import static org.junit.jupiter.api.Assertions.*;
  */
 public class GB7714LargeScaleTest {
     
-    private static final Logger logger = LoggerFactory.getLogger(GB7714LargeScaleTest.class);
     private final ReferenceChecker referenceChecker = new ReferenceChecker();
     private final FormattingAuditor formattingAuditor = new FormattingAuditor();
     

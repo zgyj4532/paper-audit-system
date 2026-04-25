@@ -46,6 +46,8 @@ _ABSTRACT_LABEL_PATTERNS = (
     ),
 )
 
+_KEYWORDS_SEPARATOR_PATTERN = re.compile(r"^Keywords:\s*.*;\S", re.IGNORECASE)
+
 _REFERENCE_FORMAT_PATTERNS = (
     (
         re.compile(r"(?<!\[)[A-Z]\]\."),
@@ -123,6 +125,17 @@ def check_text_rules(
                         needle=line,
                         rule_id=rule_id,
                     )
+            if _KEYWORDS_SEPARATOR_PATTERN.search(line):
+                add_issue(
+                    issues,
+                    issue_type="format",
+                    severity=2,
+                    message="英文关键词分隔不规范",
+                    suggestion="关键词之间统一使用“; ”分隔",
+                    text=text,
+                    needle=line,
+                    rule_id="FORMAT-005",
+                )
 
         if not _looks_like_structural_label_block(text) and re.search(
             r"[A-Za-z]+[，。；：、]", text

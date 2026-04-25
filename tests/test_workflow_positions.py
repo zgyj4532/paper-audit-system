@@ -446,9 +446,13 @@ async def test_review_document_hybrid_filters_java_reviewed_sections(monkeypatch
             },
         }
 
-    monkeypatch.setattr(langgraph, "_review_document_java_http", fake_review_document_java_http)
+    monkeypatch.setattr(
+        langgraph, "_review_document_java_http", fake_review_document_java_http
+    )
     monkeypatch.setattr(langgraph, "_review_document_local", fake_review_document_local)
-    monkeypatch.setattr(langgraph, "check_consistency_rules", lambda parsed_data, source_file=None: [])
+    monkeypatch.setattr(
+        langgraph, "check_consistency_rules", lambda parsed_data, source_file=None: []
+    )
 
     parsed_data = {
         "sections": [

@@ -1426,9 +1426,11 @@ async def _process_task(task_id: int, file_path: str, *, resume: bool = False) -
                 "parse_result": parse_result,
                 "chunks": chunks,
                 "ai_review": ai_review,
-                "java_review_raw": ai_review.get("java_review")
-                if isinstance(ai_review.get("java_review"), dict)
-                else None,
+                "java_review_raw": (
+                    ai_review.get("java_review")
+                    if isinstance(ai_review.get("java_review"), dict)
+                    else None
+                ),
                 "reference_verification": reference_results,
                 "chunk_reviews": chunk_reviews,
                 "issues_count": sum(
@@ -1548,7 +1550,9 @@ async def create_audit(
         except json.JSONDecodeError:
             raise HTTPException(status_code=400, detail="invalid audit_config")
 
-    default_max_mb = getattr(settings, "MAX_FILE_SIZE_MB", getattr(settings, "MAX_UPLOAD_SIZE", 50))
+    default_max_mb = getattr(
+        settings, "MAX_FILE_SIZE_MB", getattr(settings, "MAX_UPLOAD_SIZE", 50)
+    )
     max_mb = int(config.get("max_file_size_mb", default_max_mb))
     content = await file.read()
     if len(content) > max_mb * 1024 * 1024:

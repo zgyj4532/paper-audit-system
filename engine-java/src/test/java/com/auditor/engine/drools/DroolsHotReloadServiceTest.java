@@ -5,8 +5,6 @@ import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.DisplayName;
 import org.kie.api.runtime.KieContainer;
 
-import java.util.Map;
-
 import static org.junit.jupiter.api.Assertions.*;
 
 /**
@@ -78,9 +76,6 @@ public class DroolsHotReloadServiceTest {
     @Test
     @DisplayName("Invalid DRL should fail compilation and auto rollback, old container remains usable")
     void testInvalidDrlRollback() {
-        // Record old container
-        KieContainer oldContainer = hotReloadService.getActiveContainer();
-
         // Attempt to load invalid DRL
         DroolsHotReloadService.HotReloadResult result =
             hotReloadService.reloadRule("formatting/invalid.drl", INVALID_DRL);

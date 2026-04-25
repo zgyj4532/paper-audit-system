@@ -197,6 +197,9 @@ pub(crate) fn build_response(
     let payload = json!({
         "success": true,
         "data": data.clone(),
+        "sections": sections,
+        "references": references,
+        "metadata": metadata,
         "temp_output_path": temp_output_path,
     });
 

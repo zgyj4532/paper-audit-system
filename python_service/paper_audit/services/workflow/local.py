@@ -102,8 +102,14 @@ def _normalize_issue_position(issue: Dict[str, Any], text: str) -> Dict[str, Any
         else:
             current_width = max(0, model_end - model_start)
             original_width = len(original)
-            if current_width < original_width or text[model_start:model_end] != original:
-                normalized["position"] = {"start_char": start_char, "end_char": end_char}
+            if (
+                current_width < original_width
+                or text[model_start:model_end] != original
+            ):
+                normalized["position"] = {
+                    "start_char": start_char,
+                    "end_char": end_char,
+                }
 
     return normalized
 
@@ -151,15 +157,23 @@ async def _review_table_with_qwen(
             qwen_result.get("table_issues", []) if isinstance(qwen_result, dict) else []
         )
         return {
-            "table_issues": [issue for issue in table_issues if isinstance(issue, dict)],
+            "table_issues": [
+                issue for issue in table_issues if isinstance(issue, dict)
+            ],
             "field_summary": (
-                qwen_result.get("field_summary", {}) if isinstance(qwen_result, dict) else {}
+                qwen_result.get("field_summary", {})
+                if isinstance(qwen_result, dict)
+                else {}
             ),
             "critical_gaps": (
-                qwen_result.get("critical_gaps", []) if isinstance(qwen_result, dict) else []
+                qwen_result.get("critical_gaps", [])
+                if isinstance(qwen_result, dict)
+                else []
             ),
             "backend": (
-                qwen_result.get("backend", "qwen") if isinstance(qwen_result, dict) else "qwen"
+                qwen_result.get("backend", "qwen")
+                if isinstance(qwen_result, dict)
+                else "qwen"
             ),
             "raw": qwen_result.get("raw", {}) if isinstance(qwen_result, dict) else {},
         }
@@ -184,7 +198,9 @@ async def _review_section_group_worker(
     focus_areas: List[str],
     fast_only: bool,
     check_text: Callable[[str, List[str]], List[Dict[str, Any]]] = check_text_rules,
-    check_table: Callable[[List[Dict[str, Any]], List[str]], List[Dict[str, Any]]] = check_table_rules,
+    check_table: Callable[
+        [List[Dict[str, Any]], List[str]], List[Dict[str, Any]]
+    ] = check_table_rules,
 ) -> Dict[str, Any]:
     chunks = group.get("chunks", [])
     if chunks and all(bool(chunk.get("is_code_block")) for chunk in chunks):
@@ -224,7 +240,9 @@ async def _review_section_group_worker(
             field_summary: Dict[str, Any] = {}
             critical_gaps: List[str] = []
         else:
-            table_result = await _review_table_with_qwen(client, table_rows, focus_areas)
+            table_result = await _review_table_with_qwen(
+                client, table_rows, focus_areas
+            )
             llm_table_issues = table_result.get("table_issues", [])
             table_backend = table_result.get("backend", "qwen")
             field_summary = table_result.get("field_summary", {})
@@ -307,9 +325,14 @@ async def _review_section_group_worker(
 
     return {
         "section_id": group.get("section_id"),
-        "kind": "table" if chunks and all(bool(chunk.get("is_table")) for chunk in chunks) else "section",
+        "kind": (
+            "table"
+            if chunks and all(bool(chunk.get("is_table")) for chunk in chunks)
+            else "section"
+        ),
         "text": "\n".join(str(chunk.get("text") or "") for chunk in chunks if chunk),
-        "is_table": bool(chunks) and all(bool(chunk.get("is_table")) for chunk in chunks),
+        "is_table": bool(chunks)
+        and all(bool(chunk.get("is_table")) for chunk in chunks),
         "chunks": chunks,
         "chunk_reviews": chunk_reviews,
         "local_issues": merged_local_issues,
@@ -379,7 +402,9 @@ async def verify_references(
     resolve_backend: Callable[[], str] = resolve_reference_verifier_backend,
     can_use_local: Callable[[], bool] = can_use_local_reference_verifier,
     query_papers_fn: Callable[[str, int], List[Dict[str, Any]]] = query_papers,
-    verify_local: Callable[[str, List[Dict[str, Any]]], Dict[str, Any]] = verify_reference_locally,
+    verify_local: Callable[
+        [str, List[Dict[str, Any]]], Dict[str, Any]
+    ] = verify_reference_locally,
     worker_batch_size: int | None = None,
 ) -> List[Dict[str, Any]]:
     results: List[Dict[str, Any]] = []
@@ -391,13 +416,17 @@ async def verify_references(
             if fast_local_only():
                 local_result["reason"] = "fast_local_only"
                 local_result["risk_flags"] = list(
-                    dict.fromkeys(["fast_local_only", *local_result.get("risk_flags", [])])
+                    dict.fromkeys(
+                        ["fast_local_only", *local_result.get("risk_flags", [])]
+                    )
                 )
             results.append(local_result)
         return results
 
     client = build_client()
-    worker_count = max(1, int(worker_batch_size or getattr(settings, "LLM_QWEN_BATCH_SIZE", 4)))
+    worker_count = max(
+        1, int(worker_batch_size or getattr(settings, "LLM_QWEN_BATCH_SIZE", 4))
+    )
     semaphore = asyncio.Semaphore(worker_count)
 
     async def run_one(reference: Dict[str, Any]) -> Dict[str, Any]:
@@ -409,7 +438,9 @@ async def verify_references(
             )
             if can_use_local():
                 risk_flags = set(qwen_result.get("risk_flags", []))
-                if "llm_error" in risk_flags or (backend == "auto" and qwen_result.get("verdict") == "unverified"):
+                if "llm_error" in risk_flags or (
+                    backend == "auto" and qwen_result.get("verdict") == "unverified"
+                ):
                     return _verify_reference_with_local(reference)
             return qwen_result
 
@@ -425,12 +456,20 @@ async def review_document_local(
     normalize_areas: Callable[[Any], List[str]] = normalize_focus_areas,
     split_chunks: Callable[[Dict[str, Any]], List[Dict[str, Any]]] = split_into_chunks,
     check_text: Callable[[str, List[str]], List[Dict[str, Any]]] = check_text_rules,
-    check_table: Callable[[List[Dict[str, Any]], List[str]], List[Dict[str, Any]]] = check_table_rules,
-    check_consistency: Callable[[Dict[str, Any], str | None], List[Dict[str, Any]]] = check_consistency_rules,
-    detect_refs: Callable[[Dict[str, Any]], List[Dict[str, Any]]] = detect_reference_entries,
+    check_table: Callable[
+        [List[Dict[str, Any]], List[str]], List[Dict[str, Any]]
+    ] = check_table_rules,
+    check_consistency: Callable[
+        [Dict[str, Any], str | None], List[Dict[str, Any]]
+    ] = check_consistency_rules,
+    detect_refs: Callable[
+        [Dict[str, Any]], List[Dict[str, Any]]
+    ] = detect_reference_entries,
     query_papers_fn: Callable[[str, int], List[Dict[str, Any]]] = query_papers,
     resolve_backend: Callable[[], str] = resolve_reference_verifier_backend,
-    verify_local: Callable[[str, List[Dict[str, Any]]], Dict[str, Any]] = verify_reference_locally,
+    verify_local: Callable[
+        [str, List[Dict[str, Any]]], Dict[str, Any]
+    ] = verify_reference_locally,
     can_use_local: Callable[[], bool] = can_use_local_reference_verifier,
 ) -> Dict[str, Any]:
     focus_areas = normalize_areas(None)
@@ -451,7 +490,9 @@ async def review_document_local(
 
     async def review_section_group(group: Dict[str, Any]) -> Dict[str, Any]:
         group_chunks = group.get("chunks", [])
-        if group_chunks and all(bool(chunk.get("is_code_block")) for chunk in group_chunks):
+        if group_chunks and all(
+            bool(chunk.get("is_code_block")) for chunk in group_chunks
+        ):
             return _skipped_chunk_review(group_chunks[0], "code_block")
         async with semaphore:
             section_client = ensure_client()
@@ -464,7 +505,9 @@ async def review_document_local(
                 check_table=check_table,
             )
 
-    section_reviews = await asyncio.gather(*[review_section_group(group) for group in section_groups])
+    section_reviews = await asyncio.gather(
+        *[review_section_group(group) for group in section_groups]
+    )
 
     references = detect_refs(parsed_data)
     reference_verification = await verify_references(
@@ -488,7 +531,9 @@ async def review_document_local(
             "chunk_count": len(chunks),
             "section_count": len(section_groups),
             "reference_count": len(references),
-            "chunk_issue_count": sum(item.get("issue_count", 0) for item in section_reviews),
+            "chunk_issue_count": sum(
+                item.get("issue_count", 0) for item in section_reviews
+            ),
             "consistency_issue_count": len(consistency_issues),
             "qwen_worker_count": worker_count,
             "qwen_batch_size": worker_count,

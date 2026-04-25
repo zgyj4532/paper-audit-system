@@ -43,10 +43,6 @@ public class PageMarginChecker {
             float topMargin = metadata.getMarginTop();
             float bottomMargin = metadata.getMarginBottom();
             
-            // If proto does not have left and right margins, use default values
-            float leftMargin = EXPECTED_MARGIN;
-            float rightMargin = EXPECTED_MARGIN;
-            
             // Check top margin
             if (topMargin > 0 && !isMarginValid(topMargin)) {
                 Issue issue = Issue.newBuilder()
