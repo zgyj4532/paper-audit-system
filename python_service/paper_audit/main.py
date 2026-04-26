@@ -52,6 +52,8 @@ def run() -> None:
     )
     args, _ = parser.parse_known_args()
 
+    rule_audit_backend = str(getattr(settings, "RULE_AUDIT_BACKEND", "java_http")).strip().lower()
+
     rust_proc: Optional[subprocess.Popen] = None
     java_proc: Optional[subprocess.Popen] = None
     if not args.no_rust:
@@ -69,7 +71,9 @@ def run() -> None:
                 "No cargo in PATH and no Rust binary found; skipping Rust engine start."
             )
 
-    if not args.no_java:
+    if rule_audit_backend == "local":
+        log.info("RULE_AUDIT_BACKEND=local; skipping Java engine start.")
+    elif not args.no_java:
         if _port_is_open("127.0.0.1", int(settings.ENGINE_JAVA_HTTP_PORT)):
             log.info(
                 "Java HTTP port %s is already in use; assuming Java engine is already running and skipping launch.",
