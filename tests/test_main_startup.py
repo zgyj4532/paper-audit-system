@@ -23,7 +23,11 @@ def test_run_skips_java_start_when_backend_is_local(monkeypatch):
 
     monkeypatch.setattr(main, "start_java_process", fail_if_called)
     monkeypatch.setattr(main, "start_rust_process", lambda *args, **kwargs: None)
-    monkeypatch.setattr(main.uvicorn, "run", lambda *args, **kwargs: (_ for _ in ()).throw(SystemExit(0)))
+    monkeypatch.setattr(
+        main.uvicorn,
+        "run",
+        lambda *args, **kwargs: (_ for _ in ()).throw(SystemExit(0)),
+    )
 
     with pytest.raises(SystemExit):
         main.run()

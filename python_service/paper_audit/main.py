@@ -52,7 +52,9 @@ def run() -> None:
     )
     args, _ = parser.parse_known_args()
 
-    rule_audit_backend = str(getattr(settings, "RULE_AUDIT_BACKEND", "java_http")).strip().lower()
+    rule_audit_backend = (
+        str(getattr(settings, "RULE_AUDIT_BACKEND", "java_http")).strip().lower()
+    )
 
     rust_proc: Optional[subprocess.Popen] = None
     java_proc: Optional[subprocess.Popen] = None
