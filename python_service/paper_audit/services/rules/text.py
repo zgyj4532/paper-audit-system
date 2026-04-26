@@ -46,6 +46,8 @@ _ABSTRACT_LABEL_PATTERNS = (
     ),
 )
 
+_KEYWORDS_SEPARATOR_PATTERN = re.compile(r"^Keywords:\s*.*;\S", re.IGNORECASE)
+
 _REFERENCE_FORMAT_PATTERNS = (
     (
         re.compile(r"(?<!\[)[A-Z]\]\."),
@@ -59,25 +61,33 @@ _REFERENCE_FORMAT_PATTERNS = (
         "删除多余的左括号",
         "REF-003",
     ),
-    (
-        re.compile(r"Keywords:[A-Za-z]"),
-        "Keywords 后缺少空格",
-        "改为 Keywords: ",
-        "FORMAT-003",
-    ),
-    (
-        re.compile(r"Abstract:[A-Za-z]"),
-        "Abstract 后缺少空格",
-        "改为 Abstract: ",
-        "FORMAT-004",
-    ),
-    (
-        re.compile(r"[A-Za-z]{2,};[A-Za-z]{2,}"),
-        "英文关键词之间缺少空格",
-        "在分号后补空格",
-        "FORMAT-005",
-    ),
 )
+
+_STRUCTURAL_LABEL_HINTS = (
+    "UDC",
+    "ISBN",
+    "ISSN",
+    "Abstract",
+    "Keywords",
+    "Classification",
+    "中图分类号",
+    "分类号",
+    "学校代码",
+    "学号",
+    "姓名",
+    "专业",
+    "班级",
+    "指导教师",
+    "答辩委员会主席",
+    "阅人",
+    "评阅人",
+    "作者",
+    "培养单位",
+)
+
+
+def _looks_like_structural_label_block(text: str) -> bool:
+    return any(hint in text for hint in _STRUCTURAL_LABEL_HINTS)
 
 
 def check_text_rules(
@@ -115,8 +125,21 @@ def check_text_rules(
                         needle=line,
                         rule_id=rule_id,
                     )
+            if _KEYWORDS_SEPARATOR_PATTERN.search(line):
+                add_issue(
+                    issues,
+                    issue_type="format",
+                    severity=2,
+                    message="英文关键词分隔不规范",
+                    suggestion="关键词之间统一使用“; ”分隔",
+                    text=text,
+                    needle=line,
+                    rule_id="FORMAT-005",
+                )
 
-        if re.search(r"[A-Za-z]+[，。；：、]", text):
+        if not _looks_like_structural_label_block(text) and re.search(
+            r"[A-Za-z]+[，。；：、]", text
+        ):
             issues.append(
                 RuleIssue(
                     issue_type="format",

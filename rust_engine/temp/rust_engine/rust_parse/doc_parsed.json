@@ -8,6 +8,7 @@
       "total_tables": 0,
       "total_words": 2
     },
+    "references": [],
     "sections": [
       {
         "element_type": "Paragraph",
@@ -30,6 +31,7 @@
             "text": "Hello world"
           }
         ],
+        "text": "Hello world",
         "xml_path": "/w:body/w:p[1]"
       }
     ]
@@ -42,6 +44,7 @@
     "total_tables": 0,
     "total_words": 2
   },
+  "references": [],
   "sections": [
     {
       "element_type": "Paragraph",
@@ -64,10 +67,10 @@
           "text": "Hello world"
         }
       ],
+      "text": "Hello world",
       "xml_path": "/w:body/w:p[1]"
     }
   ],
-  "styles": null,
   "success": true,
   "temp_output_path": "./temp/rust_engine\\rust_parse\\doc_parsed.json"
 }

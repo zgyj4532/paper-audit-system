@@ -1,0 +1,138 @@
+package rules.reference
+
+import com.auditor.grpc.*
+import org.slf4j.Logger
+import java.util.regex.Pattern
+import java.util.regex.Matcher
+import java.util.BitSet
+import java.util.*
+
+global java.util.List results
+global Logger logger
+
+// Constant definitions
+dialect "java"
+
+// Global function: Check reference format
+function void checkReferenceFormat(Reference ref,List results,Logger logger){String rawText=ref.getRawText();int refNum=extractReferenceNumber(ref.getRefId());
+
+if(refNum<=0){return;}
+
+// Check document type identifier
+Character docType=extractDocType(rawText);if(docType==null){results.add(createFormatIssue(refNum,"缺少文档类型标识（例如 [M]、[J]、[D] 等）","请根据文档类型补充相应标识",rawText));}else{
+// Check required fields for specific types
+checkRequiredFields(refNum,docType,rawText,results);
+
+// Check general format
+checkGeneralFormat(refNum,rawText,results);}}
+
+// Helper function: Parse reference number
+function int extractReferenceNumber(String refId){if(refId==null||refId.isEmpty()){return 0;}
+
+try{String cleaned=refId.replaceAll("\\[|\\]","").trim();return Integer.parseInt(cleaned);}catch(NumberFormatException e){System.err.println("Unable to parse reference number: " + refId);return 0;}}
+
+// Helper function: Extract document type
+function Character extractDocType(String rawText){Pattern pattern=Pattern.compile("\\[([MCJNDRSP])\\]");Matcher matcher=pattern.matcher(rawText);return matcher.find()?matcher.group(1).charAt(0):null;}
+
+// Helper function: Check required fields
+function void checkRequiredFields(int refNum,Character docType,String rawText,List results){Map<Character,String>DOC_TYPE_MAP=Map.of('M',"Monograph",'C',"Conference Proceedings",'N',"Newspaper Article",'J',"Journal Article",'D',"Thesis",'R',"Report",'S',"Standard",'P',"Patent");
+
+Map<Character,Set<String>>REQUIRED_FIELDS=Map.of('M',new HashSet<>(Arrays.asList("作者","书名","出版地","出版者","出版年")),'J',new HashSet<>(Arrays.asList("作者","题名","刊名","年","卷","期","页码")),'D',new HashSet<>(Arrays.asList("作者","题名","保存地","保存单位","年份")),'C',new HashSet<>(Arrays.asList("作者","题名","会议名称","会议地点","会议日期")));
+
+Set<String>required=REQUIRED_FIELDS.get(docType);if(required==null){return;}
+
+for(String field:required){if(!rawText.contains(field)){String typeName=DOC_TYPE_MAP.getOrDefault(docType,"未知类型");results.add(createFormatIssue(refNum,typeName+" 缺少必需字段："+field,"请补充"+field+"信息",rawText));}}
+
+if(docType=='M'&&!rawText.contains(":")){results.add(createFormatIssue(refNum,"专著格式不完整，缺少出版地: 出版者信息","格式应为：作者. 题名[M]. 出版地: 出版者, 年份。",rawText));}
+
+if(docType=='J'&&!rawText.matches(".*\\d{4}.*,\\s*\\d+.*\\(.*\\).*")){results.add(createFormatIssue(refNum,"期刊格式不完整，缺少卷期信息","格式应为：作者. 题名[J]. 刊名, 年份, 卷(期): 页码。",rawText));}}
+
+// Helper function: Check general format
+function void checkGeneralFormat(int refNum,String rawText,List results){if(rawText.contains("，")||rawText.contains("。")){results.add(createFormatIssue(refNum,"使用了中文标点，应使用英文标点","请将中文标点（，。）替换为英文标点（,.）",rawText));}
+
+if(!rawText.trim().endsWith(".")){results.add(createFormatIssue(refNum,"末尾缺少句号","请在参考文献末尾添加英文句号",rawText));}
+
+if(!rawText.contains(".")||rawText.indexOf(".")>50){results.add(createFormatIssue(refNum,"作者格式可能不正确","作者姓名应使用英文句号分隔",rawText));}}
+
+// Helper function: Create format issue Issue
+function Issue createFormatIssue(int refNum,String description,String suggestion,String rawText){return Issue.newBuilder().setCode("ERR_REF_FORMAT_"+refNum).setMessage("Reference ["+refNum+"] "+description).setSectionId(0).setSeverity(Severity.MEDIUM).setSuggestion(suggestion).setOriginalSnippet(rawText.length()>100?rawText.substring(0,100)+"...":rawText).build();}
+
+// Helper function: Create general issue Issue
+function Issue createIssue(String code,String message,int sectionId,Severity severity){return Issue.newBuilder().setCode(code).setMessage(message).setSectionId(sectionId).setSeverity(severity).setSuggestion("请根据建议修改").setOriginalSnippet("").build();}
+
+// Helper function: Extract citation numbers
+function List<Integer>extractCitationNumbers(String text){List<Integer>citations=new ArrayList<>();Pattern CITATION_PATTERN=Pattern.compile("\\[\\s*(\\d+(?:\\s*[-,\\s]\\s*\\d+)*)\\s*\\]");Matcher matcher=CITATION_PATTERN.matcher(text);
+
+while(matcher.find()){String numbers=matcher.group(1);String[]parts=numbers.split("[,\\s]+");
+
+for(String part:parts){if(part.contains("-")){String[]range=part.split("-");try{int start=Integer.parseInt(range[0].trim());int end=Integer.parseInt(range[1].trim());for(int i=start;i<=end;i++){citations.add(i);}}catch(NumberFormatException e){System.err.println("Unable to parse citation range: " + part);}}else{try{citations.add(Integer.parseInt(part.trim()));}catch(NumberFormatException e){System.err.println("Unable to parse citation number: " + part);}}}}
+
+return citations;}
+
+// Rule 1: Check reference format
+rule "Check Reference Format"when $ref:Reference()then checkReferenceFormat($ref,results,logger);end
+
+// Rule 2: Check citation order
+rule "Check Citation Order"when $data:ParsedData()then
+// Build citation directed graph
+Map<Integer,List<Integer>>graph=new HashMap<>();
+
+for(Section section:$data.getSectionsList()){List<Integer>citations=extractCitationNumbers(section.getText());if(!citations.isEmpty()){graph.put(section.getSectionId(),citations);}}
+
+// Order validation
+List<Integer>orderedCitations=new ArrayList<>();graph.entrySet().stream().sorted(Map.Entry.comparingByKey()).forEach(entry->orderedCitations.addAll(entry.getValue()));
+
+int lastCitation=0;for(int i=0;i<orderedCitations.size();i++){int current=orderedCitations.get(i);if(current<lastCitation){int violationSection=0;for(Map.Entry<Integer,List<Integer>>entry:graph.entrySet()){if(entry.getValue().contains(current)){violationSection=entry.getKey();break;}}
+
+Issue issue=Issue.newBuilder().setCode("ERR_REF_ORDER_001").setMessage(String.format("引用编号不符合顺序：[%d] 出现在 [%d] 之后，应将 [%d] 排在 [%d] 之前",current,lastCitation,lastCitation,current)).setSectionId(violationSection).setSeverity(Severity.HIGH).setSuggestion("请按照正文出现顺序重新编号").setOriginalSnippet(String.format("引用顺序错误：...[%d]...[%d]...",lastCitation,current)).build();results.add(issue);break;}lastCitation=current;}end
+
+// Rule 3: Check citation closure
+rule "Check Citation Closure"when $data:ParsedData()then
+// Build citation directed graph
+Map<Integer,List<Integer>>graph=new HashMap<>();Set<Integer>citedNumbers=new HashSet<>();
+
+for(Section section:$data.getSectionsList()){List<Integer>citations=extractCitationNumbers(section.getText());if(!citations.isEmpty()){graph.put(section.getSectionId(),citations);citedNumbers.addAll(citations);}}
+
+// Get existing reference numbers
+Set<Integer>existingRefNumbers=new HashSet<>();for(Reference ref:$data.getReferencesList()){int refNum=extractReferenceNumber(ref.getRefId());if(refNum>0){existingRefNumbers.add(refNum);}}
+
+// Check missing citations
+for(Integer citedNum:citedNumbers){if(!existingRefNumbers.contains(citedNum)){int sectionId=0;for(Map.Entry<Integer,List<Integer>>entry:graph.entrySet()){if(entry.getValue().contains(citedNum)){sectionId=entry.getKey();break;}}
+
+Issue issue=Issue.newBuilder().setCode("ERR_REF_MISSING_001").setMessage("参考文献 ["+citedNum+"] 已在正文中引用，但未出现在参考文献表中").setSectionId(sectionId).setSeverity(Severity.CRITICAL).setSuggestion("请补充参考文献 ["+citedNum+"]").setOriginalSnippet("Citation ["+citedNum+"]").build();results.add(issue);}}
+
+// Check unused references
+for(Integer refNum:existingRefNumbers){if(!citedNumbers.contains(refNum)){Issue issue=Issue.newBuilder().setCode("WARN_REF_UNUSED_001").setMessage("参考文献 ["+refNum+"] 未在正文中被引用").setSectionId(0).setSeverity(Severity.LOW).setSuggestion("请删除未使用的参考文献，或在正文中补充引用").setOriginalSnippet("").build();results.add(issue);}}end
+
+// Rule 4: Bitmap algorithm check
+rule "Bitmap Algorithm Check"when $data:ParsedData()then
+// Get maximum reference number
+int maxRefNumber=0;for(Reference ref:$data.getReferencesList()){int refNum=extractReferenceNumber(ref.getRefId());if(refNum>maxRefNumber){maxRefNumber=refNum;}}
+
+if(maxRefNumber<=0){return;}
+
+BitSet citationBitmap=new BitSet(maxRefNumber+1);BitSet referenceBitmap=new BitSet(maxRefNumber+1);
+
+// Build citation bitmap
+for(Section section:$data.getSectionsList()){for(Integer citation:extractCitationNumbers(section.getText())){if(citation<=maxRefNumber&&citation>0){citationBitmap.set(citation);}}}
+
+// Build reference bitmap
+for(Reference ref:$data.getReferencesList()){int refNum=extractReferenceNumber(ref.getRefId());if(refNum>0&&refNum<=maxRefNumber){referenceBitmap.set(refNum);}}
+
+// Check cited but missing references
+BitSet citedButMissing=(BitSet)citationBitmap.clone();citedButMissing.andNot(referenceBitmap);
+
+for(int i=citedButMissing.nextSetBit(0);i>=0;i=citedButMissing.nextSetBit(i+1)){results.add(Issue.newBuilder().setCode("ERR_REF_BITMAP_MISSING").setMessage("位图检查：参考文献 ["+i+"] 已被引用但缺失").setSectionId(0).setSeverity(Severity.HIGH).setSuggestion("请补充参考文献 ["+i+"]").setOriginalSnippet("").build());}
+
+// Check existing but not cited references
+BitSet existsButNotCited=(BitSet)referenceBitmap.clone();existsButNotCited.andNot(citationBitmap);
+
+for(int i=existsButNotCited.nextSetBit(0);i>=0;i=existsButNotCited.nextSetBit(i+1)){results.add(Issue.newBuilder().setCode("WARN_REF_BITMAP_UNUSED").setMessage("位图检查：参考文献 ["+i+"] 存在但未被引用").setSectionId(0).setSeverity(Severity.LOW).setSuggestion("请删除参考文献 ["+i+"]，或在正文中补充引用").setOriginalSnippet("").build());}
+
+// Check citation number continuity
+int firstCitation=citationBitmap.nextSetBit(0);if(firstCitation>0){int expected=firstCitation;for(int i=firstCitation;i<=maxRefNumber;i++){if(citationBitmap.get(i)){if(i!=expected){results.add(Issue.newBuilder().setCode("ERR_REF_BITMAP_GAP").setMessage("位图检查：引用编号不连续，缺少引用 ["+expected+"]").setSectionId(0).setSeverity(Severity.MEDIUM).setSuggestion("请补充引用 ["+expected+"] 或重新编号").setOriginalSnippet("").build());break;}expected++;}}}
+
+logger.debug("Bitmap algorithm check completed, max number: {}, citation count: {}, reference count: {}",maxRefNumber,citationBitmap.cardinality(),referenceBitmap.cardinality());end
+
+// Rule 5: Null data check
+rule "Null Data Check"when $data:ParsedData($data==null)then results.add(createIssue("ERR_REF_NULL","输入数据为空",0,Severity.CRITICAL));end

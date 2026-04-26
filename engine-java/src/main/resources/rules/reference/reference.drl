@@ -1,0 +1,1092 @@
+package rules.reference;
+
+import com.auditor.grpc.Reference;
+import com.auditor.grpc.ParsedData;
+import com.auditor.grpc.Section;
+import com.auditor.grpc.Issue;
+import com.auditor.grpc.Severity;
+import java.util.List;
+import java.util.regex.Pattern;
+import java.util.regex.Matcher;
+
+global List results;
+global org.slf4j.Logger logger;
+
+function String stripDoiSuffix(String rawText) {
+    if (rawText == null) {
+        return "";
+    }
+    String lower = rawText.toLowerCase();
+    int doiIndex = lower.indexOf("doi");
+    if (doiIndex >= 0) {
+        return rawText.substring(0, doiIndex);
+    }
+    return rawText;
+}
+
+function String journalYearWindow(String rawText) {
+    String text = stripDoiSuffix(rawText);
+    int titleEnd = text.indexOf("] ");
+    if (titleEnd >= 0 && titleEnd + 2 < text.length()) {
+        text = text.substring(titleEnd + 2);
+    }
+    int colonIndex = text.indexOf(':');
+    if (colonIndex >= 0) {
+        text = text.substring(0, colonIndex);
+    }
+    return text;
+}
+
+// ==================== Rule 1: Journal Full-Width Comma in Author Section ====================
+// GB/T 7714: Authors should be separated by half-width comma (,), not full-width comma (，)
+rule "Journal Reference Full Width Comma Check"
+when
+    $ref: Reference(rawText.contains("[J]"))
+then
+    String rawText = $ref.getRawText();
+    int refNum = 0;
+    try {
+        String refId = $ref.getRefId();
+        if (refId != null && refId.length() > 0) {
+            String cleaned = refId.replaceAll("\\[|\\]", "").trim();
+            refNum = Integer.parseInt(cleaned);
+        }
+    } catch (Exception e) {
+        logger.warn("Unable to parse reference number");
+    }
+    if (refNum > 0) {
+        // Extract author part: text before the first ". " (which separates authors from title)
+        String authorPart = rawText;
+        int bracketEnd = rawText.indexOf("] ");
+        if (bracketEnd >= 0) {
+            authorPart = rawText.substring(bracketEnd + 2);
+        }
+        int dotSpace = authorPart.indexOf(". ");
+        if (dotSpace > 0) {
+            authorPart = authorPart.substring(0, dotSpace);
+        }
+        // Check if author part contains full-width comma (U+FF0C)
+        if (authorPart.indexOf('\uff0c') >= 0) {
+            results.add(Issue.newBuilder()
+                    .setCode("ERR_REF_JOURNAL_FULL_COMMA")
+                    .setMessage("Reference [" + refNum + "] journal: authors should use half-width comma (,), not full-width comma")
+                    .setSectionId(0)
+                    .setSeverity(Severity.HIGH)
+                    .setSuggestion("作者部分请将全角逗号改为半角逗号")
+                    .setOriginalSnippet(rawText.length() > 150 ? rawText.substring(0, 150) + "..." : rawText)
+                    .build());
+        }
+    }
+end
+
+// ==================== Rule 2: Journal Year Out of Range ====================
+rule "Journal Reference Year Out of Range Check"
+when
+    $ref: Reference(rawText.contains("[J]"))
+then
+    String rawText = $ref.getRawText();
+    String yearText = journalYearWindow(rawText);
+    int refNum = 0;
+    try {
+        String refId = $ref.getRefId();
+        if (refId != null && refId.length() > 0) {
+            String cleaned = refId.replaceAll("\\[|\\]", "").trim();
+            refNum = Integer.parseInt(cleaned);
+        }
+    } catch (Exception e) {}
+    if (refNum > 0) {
+        // Hardened year extraction (v5):
+        // Use strict word-boundary matching: year must NOT be preceded or followed by a digit.
+        // This catches formats like ",2030," ",2030." ",2030:" without needing delimiter groups.
+        // isArxiv is narrowed: only skip if year is followed by "." AND then another digit
+        // (true arXiv pattern: 2301.12345), NOT if followed by "." alone (end of sentence).
+            Pattern yearPattern = Pattern.compile("(?<!\\d)((?:19|20)[0-9]{2})(?:\\([^\\)]*\\))?(?!\\d)");
+        Matcher m = yearPattern.matcher(yearText);
+        boolean found = false;
+        while (m.find() && !found) {
+            try {
+                int year = Integer.parseInt(m.group(1));
+                int matchEnd = m.end(1);
+                // True arXiv: year followed by "." then a digit, e.g. "2301.12345"
+                boolean isArxiv = matchEnd < yearText.length() - 1
+                    && yearText.charAt(matchEnd) == '.'
+                    && Character.isDigit(yearText.charAt(matchEnd + 1));
+                // Volume in parentheses: e.g. "(2030)" -- skip
+                boolean inParens = m.start(1) > 0 && yearText.charAt(m.start(1) - 1) == '(';
+                if (!isArxiv && !inParens && year > 2026) {
+                    results.add(Issue.newBuilder()
+                            .setCode("ERR_REF_JOURNAL_YEAR_EXCEED")
+                            .setMessage("Reference [" + refNum + "] year " + year + " > 2026")
+                            .setSectionId(0).setSeverity(Severity.HIGH)
+                            .setSuggestion("请检查年份是否正确")
+                            .setOriginalSnippet(rawText.length() > 150 ? rawText.substring(0, 150) + "..." : rawText)
+                            .build());
+                    found = true;
+                }
+            } catch (NumberFormatException e) {}
+        }
+    }
+end
+
+// ==================== Rule 3: Journal No Dot After [J] ====================
+rule "Journal Reference J Mark No Dot Check"
+when
+    $ref: Reference(rawText.contains("[J]"))
+then
+    String rawText = $ref.getRawText();
+    if (!rawText.contains("[J].") && !rawText.contains("[J]\u3002")) {
+        int refNum = 0;
+        try {
+            String refId = $ref.getRefId();
+            if (refId != null && refId.length() > 0) {
+                String cleaned = refId.replaceAll("\\[|\\]", "").trim();
+                refNum = Integer.parseInt(cleaned);
+            }
+        } catch (Exception e) {}
+        if (refNum > 0) {
+            results.add(Issue.newBuilder()
+                    .setCode("ERR_REF_JOURNAL_NO_DOT")
+                    .setMessage("Reference [" + refNum + "] should have period after [J]")
+                    .setSectionId(0).setSeverity(Severity.HIGH)
+                    .setSuggestion("请在[J]后补句点")
+                    .setOriginalSnippet(rawText.length() > 150 ? rawText.substring(0, 150) + "..." : rawText)
+                    .build());
+        }
+    }
+end
+// ==================== Rule 4: Journal Missing Volume(Issue) ====================
+rule "Journal Reference Missing Volume and Issue Check"
+when
+    $ref: Reference(rawText.contains("[J]"))
+then
+    String rawText = $ref.getRawText();
+    int refNum = 0;
+    try {
+        String refId = $ref.getRefId();
+        if (refId != null && refId.length() > 0) {
+            String cleaned = refId.replaceAll("\\[|\\]", "").trim();
+            refNum = Integer.parseInt(cleaned);
+        }
+    } catch (Exception e) {}
+    if (refNum > 0) {
+        Pattern volPattern = Pattern.compile("\\d+\\(\\d+\\)");
+        if (!volPattern.matcher(rawText).find()) {
+            results.add(Issue.newBuilder()
+                    .setCode("ERR_REF_JOURNAL_NO_VOLUME")
+                    .setMessage("Reference [" + refNum + "] missing volume and issue number")
+                    .setSectionId(0).setSeverity(Severity.MEDIUM)
+                    .setSuggestion("请补充卷(期)号")
+                    .setOriginalSnippet(rawText.length() > 150 ? rawText.substring(0, 150) + "..." : rawText)
+                    .build());
+        }
+    }
+end
+
+// ==================== Rule 5: Journal Missing Page Range ====================
+rule "Journal Reference Missing Page Range Check"
+when
+    $ref: Reference(rawText.contains("[J]"))
+then
+    String rawText = $ref.getRawText();
+    int refNum = 0;
+    try {
+        String refId = $ref.getRefId();
+        if (refId != null && refId.length() > 0) {
+            String cleaned = refId.replaceAll("\\[|\\]", "").trim();
+            refNum = Integer.parseInt(cleaned);
+        }
+    } catch (Exception e) {}
+    if (refNum > 0) {
+        Pattern pagePattern = Pattern.compile("\\d+-\\d+");
+        if (!pagePattern.matcher(rawText).find()) {
+            results.add(Issue.newBuilder()
+                    .setCode("ERR_REF_JOURNAL_NO_PAGE")
+                    .setMessage("Reference [" + refNum + "] missing page range")
+                    .setSectionId(0).setSeverity(Severity.MEDIUM)
+                    .setSuggestion("请补充页码范围，例如 1-20")
+                    .setOriginalSnippet(rawText.length() > 150 ? rawText.substring(0, 150) + "..." : rawText)
+                    .build());
+        }
+    }
+end
+
+// ==================== Rule 6: Journal Multiple Authors No Et Al ====================
+// GB/T 7714: If authors >= 4, use "et al." or "等" after the 3rd author
+rule "Journal Reference Multiple Authors No Et Al Check"
+when
+    $ref: Reference(rawText.contains("[J]"))
+then
+    String rawText = $ref.getRawText();
+    int refNum = 0;
+    try {
+        String refId = $ref.getRefId();
+        if (refId != null && refId.length() > 0) {
+            String cleaned = refId.replaceAll("\\[|\\]", "").trim();
+            refNum = Integer.parseInt(cleaned);
+        }
+    } catch (Exception e) {}
+    if (refNum > 0) {
+        // Extract author part (before first ". ")
+        String authorPart = rawText;
+        int bracketEnd = rawText.indexOf("] ");
+        if (bracketEnd >= 0) authorPart = rawText.substring(bracketEnd + 2);
+        int dotIdx = authorPart.indexOf(". ");
+        if (dotIdx > 0) authorPart = authorPart.substring(0, dotIdx);
+        // Count commas (both half-width and full-width) to estimate author count
+        int commaCount = 0;
+        for (int i = 0; i < authorPart.length(); i++) {
+            char c = authorPart.charAt(i);
+            if (c == ',' || c == (char)0xFF0C) commaCount++;
+        }
+        // If >= 3 commas (4+ authors) and no "等" or "et al"
+        boolean hasEtAl = authorPart.contains("\u7b49") || authorPart.contains("et al") || authorPart.contains("et al.");
+        if (commaCount >= 3 && !hasEtAl) {
+            results.add(Issue.newBuilder()
+                    .setCode("ERR_REF_JOURNAL_MULTI_AUTHOR")
+                    .setMessage("Reference [" + refNum + "] has 4+ authors but missing 'et al.' or '\u7b49'")
+                    .setSectionId(0).setSeverity(Severity.MEDIUM)
+                    .setSuggestion("当作者超过4人时，请在第3位作者后使用“等”或“et al.”")
+                    .setOriginalSnippet(rawText.length() > 150 ? rawText.substring(0, 150) + "..." : rawText)
+                    .build());
+        }
+    }
+end
+
+// ==================== Rule 7: Monograph Full-Width Period ====================
+rule "Monograph Reference Full Width Period Check"
+when
+    $ref: Reference(rawText.contains("[M]"))
+then
+    String rawText = $ref.getRawText();
+    // Check for full-width period (。) in the reference
+    if (rawText.indexOf('\u3002') >= 0) {
+        int refNum = 0;
+        try {
+            String refId = $ref.getRefId();
+            if (refId != null && refId.length() > 0) {
+                String cleaned = refId.replaceAll("\\[|\\]", "").trim();
+                refNum = Integer.parseInt(cleaned);
+            }
+        } catch (Exception e) {}
+        if (refNum > 0) {
+            results.add(Issue.newBuilder()
+                    .setCode("ERR_REF_MONO_FULL_PERIOD")
+                    .setMessage("Reference [" + refNum + "] uses full-width period (\u3002) instead of half-width period (.)")
+                    .setSectionId(0).setSeverity(Severity.MEDIUM)
+                    .setSuggestion("请将全角句号（。）改为半角句号（.）")
+                    .setOriginalSnippet(rawText.length() > 150 ? rawText.substring(0, 150) + "..." : rawText)
+                    .build());
+        }
+    }
+end
+
+// ==================== Rule 8: Monograph Year Out of Range ====================
+rule "Monograph Reference Year Out of Range Check"
+when
+    $ref: Reference(rawText.contains("[M]"))
+then
+    String rawText = $ref.getRawText();
+    String yearText = journalYearWindow(rawText);
+    int refNum = 0;
+    try {
+        String refId = $ref.getRefId();
+        if (refId != null && refId.length() > 0) {
+            String cleaned = refId.replaceAll("\\[|\\]", "").trim();
+            refNum = Integer.parseInt(cleaned);
+        }
+    } catch (Exception e) {}
+    if (refNum > 0) {
+        Pattern yearPattern = Pattern.compile("[,\uff0c\\s]((?:19|20)\\d{2})[,\uff0c.\\s:\uff1a]");
+        Matcher m = yearPattern.matcher(yearText);
+        boolean found = false;
+        while (m.find() && !found) {
+            try {
+                int year = Integer.parseInt(m.group(1));
+                // Avoid ISBN numbers (preceded by "ISBN" keyword)
+                int matchStart = m.start(1);
+                String before = rawText.substring(Math.max(0, matchStart - 10), matchStart);
+                boolean isIsbn = before.contains("ISBN") || before.contains("isbn");
+                if (!isIsbn && year > 2026) {
+                    results.add(Issue.newBuilder()
+                            .setCode("ERR_REF_MONO_YEAR_EXCEED")
+                            .setMessage("Reference [" + refNum + "] year " + year + " > 2026")
+                            .setSectionId(0).setSeverity(Severity.HIGH)
+                            .setSuggestion("请检查年份是否正确")
+                            .setOriginalSnippet(rawText.length() > 150 ? rawText.substring(0, 150) + "..." : rawText)
+                            .build());
+                    found = true;
+                }
+            } catch (NumberFormatException e) {}
+        }
+    }
+end
+
+// ==================== Rule 9: Monograph No Dot After [M] ====================
+rule "Monograph Reference M Mark No Dot Check"
+when
+    $ref: Reference(rawText.contains("[M]"))
+then
+    String rawText = $ref.getRawText();
+    if (!rawText.contains("[M].") && !rawText.contains("[M]\u3002")) {
+        int refNum = 0;
+        try {
+            String refId = $ref.getRefId();
+            if (refId != null && refId.length() > 0) {
+                String cleaned = refId.replaceAll("\\[|\\]", "").trim();
+                refNum = Integer.parseInt(cleaned);
+            }
+        } catch (Exception e) {}
+        if (refNum > 0) {
+            results.add(Issue.newBuilder()
+                    .setCode("ERR_REF_MONO_NO_DOT")
+                    .setMessage("Reference [" + refNum + "] should have period after [M]")
+                    .setSectionId(0).setSeverity(Severity.HIGH)
+                    .setSuggestion("请在[M]后补句点")
+                    .setOriginalSnippet(rawText.length() > 150 ? rawText.substring(0, 150) + "..." : rawText)
+                    .build());
+        }
+    }
+end
+
+// ==================== Rule 10: Monograph Missing Publisher (no place AND no publisher) ====================
+// ERR_REF_MONO_NO_PUBLISHER: completely missing publication info (no colon, no publisher keyword)
+rule "Monograph Reference Missing Publisher Check"
+when
+    $ref: Reference(rawText.contains("[M]"))
+then
+    String rawText = $ref.getRawText();
+    int refNum = 0;
+    try {
+        String refId = $ref.getRefId();
+        if (refId != null && refId.length() > 0) {
+            String cleaned = refId.replaceAll("\\[|\\]", "").trim();
+            refNum = Integer.parseInt(cleaned);
+        }
+    } catch (Exception e) {}
+    if (refNum > 0) {
+        boolean hasPublisherKeyword = rawText.contains("\u51fa\u7248\u793e") || rawText.contains("\u51fa\u7248\u5c40") ||
+                                      rawText.contains("Press") || rawText.contains("Publisher") ||
+                                      rawText.contains("Publishing");
+        boolean hasColonSeparator = rawText.contains(":") || rawText.indexOf('\uff1a') >= 0;
+        // Missing publisher: no colon separator AND no publisher keyword
+        // This covers: "[M]. 2022." (no place, no publisher)
+        // and "[M]. MIT Press, 2016." (has publisher keyword but no colon/place)
+        if (!hasColonSeparator && !hasPublisherKeyword) {
+            results.add(Issue.newBuilder()
+                    .setCode("ERR_REF_MONO_NO_PUBLISHER")
+                    .setMessage("Reference [" + refNum + "] monograph missing place and publisher")
+                    .setSectionId(0).setSeverity(Severity.HIGH)
+                    .setSuggestion("请补充出版地和出版社，格式：出版地：出版社")
+                    .setOriginalSnippet(rawText.length() > 150 ? rawText.substring(0, 150) + "..." : rawText)
+                    .build());
+        } else if (!hasColonSeparator && hasPublisherKeyword) {
+            // Has publisher keyword but no colon (no place) -> ERR_REF_MONO_NO_PUBLISHER
+            results.add(Issue.newBuilder()
+                    .setCode("ERR_REF_MONO_NO_PUBLISHER")
+                    .setMessage("Reference [" + refNum + "] monograph missing place of publication (no colon separator)")
+                    .setSectionId(0).setSeverity(Severity.HIGH)
+                    .setSuggestion("请在出版地前补充出版社，格式：出版地：出版社")
+                    .setOriginalSnippet(rawText.length() > 150 ? rawText.substring(0, 150) + "..." : rawText)
+                    .build());
+        }
+    }
+end
+
+// ==================== Rule 11: Monograph Multiple Authors No Et Al ====================
+rule "Monograph Reference Multiple Authors No Et Al Check"
+when
+    $ref: Reference(rawText.contains("[M]"))
+then
+    String rawText = $ref.getRawText();
+    int refNum = 0;
+    try {
+        String refId = $ref.getRefId();
+        if (refId != null && refId.length() > 0) {
+            String cleaned = refId.replaceAll("\\[|\\]", "").trim();
+            refNum = Integer.parseInt(cleaned);
+        }
+    } catch (Exception e) {}
+    if (refNum > 0) {
+        String authorPart = rawText;
+        int bracketEnd = rawText.indexOf("] ");
+        if (bracketEnd >= 0) authorPart = rawText.substring(bracketEnd + 2);
+        int dotIdx = authorPart.indexOf(". ");
+        if (dotIdx > 0) authorPart = authorPart.substring(0, dotIdx);
+        int commaCount = 0;
+        for (int i = 0; i < authorPart.length(); i++) {
+            char c = authorPart.charAt(i);
+            if (c == ',' || c == (char)0xFF0C) commaCount++;
+        }
+        boolean hasEtAl = authorPart.contains("\u7b49") || authorPart.contains("et al");
+        if (commaCount >= 3 && !hasEtAl) {
+            results.add(Issue.newBuilder()
+                    .setCode("ERR_REF_MONO_MULTI_AUTHOR")
+                    .setMessage("Reference [" + refNum + "] has 4+ authors but missing 'et al.' or '\u7b49'")
+                    .setSectionId(0).setSeverity(Severity.MEDIUM)
+                    .setSuggestion("作者超过4人时，请在第3位作者后使用“等”或“et al.”")
+                    .setOriginalSnippet(rawText.length() > 150 ? rawText.substring(0, 150) + "..." : rawText)
+                    .build());
+        }
+    }
+end
+
+// ==================== Rule 12: Missing Reference Entry ====================
+rule "Missing Reference Entry Check"
+when
+    $data: ParsedData()
+then
+    java.util.Set<String> citedRefs = new java.util.HashSet<>();
+    java.util.Set<String> listedRefs = new java.util.HashSet<>();
+    Pattern citationPattern = Pattern.compile("\\[(\\d+)\\]");
+    for (Section section : $data.getSectionsList()) {
+        if (section.getText() != null) {
+            Matcher m = citationPattern.matcher(section.getText());
+            while (m.find()) {
+                citedRefs.add("[" + m.group(1) + "]");
+            }
+        }
+    }
+    for (com.auditor.grpc.Reference ref : $data.getReferencesList()) {
+        listedRefs.add(ref.getRefId());
+    }
+    for (String cited : citedRefs) {
+        if (!listedRefs.contains(cited)) {
+            results.add(Issue.newBuilder()
+                    .setCode("ERR_REF_MISSING")
+                    .setMessage("In-text citation " + cited + " has no corresponding reference entry")
+                    .setSectionId(0).setSeverity(Severity.HIGH)
+                    .setSuggestion("请补充对 " + cited + " 的参考文献条目")
+                    .setOriginalSnippet("")
+                    .build());
+        }
+    }
+end
+
+// ==================== Rule 13: Journal Year Too Early ====================
+rule "Journal Reference Year Too Early Check"
+when
+    $ref: Reference(rawText.contains("[J]"))
+then
+    String rawText = $ref.getRawText();
+    String yearText = journalYearWindow(rawText);
+    int refNum = 0;
+    try {
+        String refId = $ref.getRefId();
+        if (refId != null && refId.length() > 0) {
+            String cleaned = refId.replaceAll("\\[|\\]", "").trim();
+            refNum = Integer.parseInt(cleaned);
+        }
+    } catch (Exception e) {}
+    if (refNum > 0) {
+        Pattern yearPattern = Pattern.compile("[,\uff0c\\s]((?:1[0-8]|19)\\d{2})[,\uff0c.\\s:\uff1a]");
+        Matcher m = yearPattern.matcher(yearText);
+        boolean found = false;
+        while (m.find() && !found) {
+            try {
+                int year = Integer.parseInt(m.group(1));
+                boolean inParens = m.start(1) > 0 && yearText.charAt(m.start(1) - 1) == '(';
+                if (!inParens && year < 1900) {
+                    results.add(Issue.newBuilder()
+                            .setCode("ERR_REF_JOURNAL_YEAR_EARLY")
+                            .setMessage("Reference [" + refNum + "] year " + year + " < 1900")
+                            .setSectionId(0).setSeverity(Severity.MEDIUM)
+                            .setSuggestion("请检查年份是否正确")
+                            .setOriginalSnippet(rawText.length() > 150 ? rawText.substring(0, 150) + "..." : rawText)
+                            .build());
+                    found = true;
+                }
+            } catch (NumberFormatException e) {}
+        }
+    }
+end
+
+// ==================== Rule 14: Monograph Year Too Early ====================
+rule "Monograph Reference Year Too Early Check"
+when
+    $ref: Reference(rawText.contains("[M]"))
+then
+    String rawText = $ref.getRawText();
+    String yearText = stripDoiSuffix(rawText);
+    int refNum = 0;
+    try {
+        String refId = $ref.getRefId();
+        if (refId != null && refId.length() > 0) {
+            String cleaned = refId.replaceAll("\\[|\\]", "").trim();
+            refNum = Integer.parseInt(cleaned);
+        }
+    } catch (Exception e) {}
+    if (refNum > 0) {
+        Pattern yearPattern = Pattern.compile("[,\uff0c\\s]((?:1[0-8]|19)\\d{2})[,\uff0c.\\s:\uff1a]");
+        Matcher m = yearPattern.matcher(yearText);
+        boolean found = false;
+        while (m.find() && !found) {
+            try {
+                int year = Integer.parseInt(m.group(1));
+                if (year < 1900) {
+                    results.add(Issue.newBuilder()
+                            .setCode("ERR_REF_MONO_YEAR_EARLY")
+                            .setMessage("Reference [" + refNum + "] year " + year + " < 1900")
+                            .setSectionId(0).setSeverity(Severity.MEDIUM)
+                            .setSuggestion("请检查年份是否正确")
+                            .setOriginalSnippet(rawText.length() > 150 ? rawText.substring(0, 150) + "..." : rawText)
+                            .build());
+                    found = true;
+                }
+            } catch (NumberFormatException e) {}
+        }
+    }
+end
+
+// ==================== Rule 15: Journal Lowercase [j] ====================
+rule "Journal Reference Lowercase J Mark Check"
+when
+    $ref: Reference(rawText.contains("[j]"))
+then
+    String rawText = $ref.getRawText();
+    int refNum = 0;
+    try {
+        String refId = $ref.getRefId();
+        if (refId != null && refId.length() > 0) {
+            String cleaned = refId.replaceAll("\\[|\\]", "").trim();
+            refNum = Integer.parseInt(cleaned);
+        }
+    } catch (Exception e) {}
+    if (refNum > 0) {
+        results.add(Issue.newBuilder()
+                .setCode("ERR_REF_JOURNAL_LOWERCASE")
+                .setMessage("Reference [" + refNum + "] should use uppercase [J], not [j]")
+                .setSectionId(0).setSeverity(Severity.MEDIUM)
+                .setSuggestion("请将[j]改为[J]")
+                .setOriginalSnippet(rawText.length() > 150 ? rawText.substring(0, 150) + "..." : rawText)
+                .build());
+    }
+end
+
+// ==================== Rule 16: Journal Two-Digit Year ====================
+rule "Journal Reference Two Digit Year Check"
+when
+    $ref: Reference(rawText.contains("[J]"))
+then
+    String rawText = $ref.getRawText();
+    String yearText = journalYearWindow(rawText);
+    int refNum = 0;
+    try {
+        String refId = $ref.getRefId();
+        if (refId != null && refId.length() > 0) {
+            String cleaned = refId.replaceAll("\\[|\\]", "").trim();
+            refNum = Integer.parseInt(cleaned);
+        }
+    } catch (Exception e) {}
+    if (refNum > 0) {
+        // Look for 2-digit year: comma/space + 2 digits + comma/space (not part of larger number)
+        Pattern twoDigitYear = Pattern.compile("[,\uff0c\\s](\\d{2})[,\uff0c.\\s:\uff1a]");
+        Matcher m = twoDigitYear.matcher(yearText);
+        while (m.find()) {
+            try {
+                // Make sure it's not part of a 4-digit number
+                int start = m.start(1);
+                int end = m.end(1);
+                boolean partOfLarger = (start > 0 && Character.isDigit(yearText.charAt(start - 1))) ||
+                                       (end < yearText.length() && Character.isDigit(yearText.charAt(end)));
+                if (!partOfLarger) {
+                    int yr = Integer.parseInt(m.group(1));
+                    results.add(Issue.newBuilder()
+                            .setCode("ERR_REF_JOURNAL_YEAR_TWO_DIGIT")
+                            .setMessage("Reference [" + refNum + "] year should be 4 digits, not 2 digits")
+                            .setSectionId(0).setSeverity(Severity.MEDIUM)
+                            .setSuggestion("请使用4位年份格式")
+                            .setOriginalSnippet(rawText.length() > 150 ? rawText.substring(0, 150) + "..." : rawText)
+                            .build());
+                    break;
+                }
+            } catch (NumberFormatException e) {}
+        }
+    }
+end
+
+// ==================== Rule 17: Monograph Two-Digit Year ====================
+rule "Monograph Reference Two Digit Year Check"
+when
+    $ref: Reference(rawText.contains("[M]"))
+then
+    String rawText = $ref.getRawText();
+    String yearText = stripDoiSuffix(rawText);
+    int refNum = 0;
+    try {
+        String refId = $ref.getRefId();
+        if (refId != null && refId.length() > 0) {
+            String cleaned = refId.replaceAll("\\[|\\]", "").trim();
+            refNum = Integer.parseInt(cleaned);
+        }
+    } catch (Exception e) {}
+    if (refNum > 0) {
+        Pattern twoDigitYear = Pattern.compile("[,\uff0c\\s](\\d{2})[,\uff0c.\\s:\uff1a]");
+        Matcher m = twoDigitYear.matcher(yearText);
+        while (m.find()) {
+            try {
+                int start = m.start(1);
+                int end = m.end(1);
+                boolean partOfLarger = (start > 0 && Character.isDigit(yearText.charAt(start - 1))) ||
+                                       (end < yearText.length() && Character.isDigit(yearText.charAt(end)));
+                if (!partOfLarger) {
+                    results.add(Issue.newBuilder()
+                            .setCode("ERR_REF_MONO_YEAR_TWO_DIGIT")
+                            .setMessage("Reference [" + refNum + "] year should be 4 digits, not 2 digits")
+                            .setSectionId(0).setSeverity(Severity.MEDIUM)
+                            .setSuggestion("请使用4位年份格式")
+                            .setOriginalSnippet(rawText.length() > 150 ? rawText.substring(0, 150) + "..." : rawText)
+                            .build());
+                    break;
+                }
+            } catch (NumberFormatException e) {}
+        }
+    }
+end
+
+// ==================== Rule 18: Journal Missing Author ====================
+rule "Journal Reference Missing Author Check"
+when
+    $ref: Reference(rawText.contains("[J]"))
+then
+    String rawText = $ref.getRawText();
+    int refNum = 0;
+    try {
+        String refId = $ref.getRefId();
+        if (refId != null && refId.length() > 0) {
+            String cleaned = refId.replaceAll("\\[|\\]", "").trim();
+            refNum = Integer.parseInt(cleaned);
+        }
+    } catch (Exception e) {}
+    if (refNum > 0) {
+        // Author part is between "[N] " and the first ". " (title separator)
+        String afterNum = rawText;
+        int bracketEnd = rawText.indexOf("] ");
+        if (bracketEnd >= 0) afterNum = rawText.substring(bracketEnd + 2);
+        int dotIdx = afterNum.indexOf(". ");
+        boolean missingAuthor = false;
+        if (dotIdx <= 0) {
+            // No ". " found at all
+            missingAuthor = true;
+        } else {
+            String beforeDot = afterNum.substring(0, dotIdx);
+            // Author segment must NOT contain [J] itself
+            // AND must look like a name: Chinese chars OR ALL-CAPS English words
+            boolean hasChineseName = beforeDot.matches(".*[\u4e00-\u9fa5]+.*");
+            boolean hasEnglishName = beforeDot.matches(".*[A-Z]{2,}.*");
+            boolean segmentHasJMark = beforeDot.contains("[J]");
+            if (segmentHasJMark) {
+                // [J] is in the first segment -> title came first, no author
+                missingAuthor = true;
+            } else if (!hasChineseName && !hasEnglishName) {
+                // No recognizable author pattern
+                missingAuthor = true;
+            }
+        }
+        if (missingAuthor) {
+            results.add(Issue.newBuilder()
+                    .setCode("ERR_REF_JOURNAL_NO_AUTHOR")
+                    .setMessage("Reference [" + refNum + "] journal missing author name")
+                    .setSectionId(0).setSeverity(Severity.HIGH)
+                    .setSuggestion("请在题目前补充作者姓名")
+                    .setOriginalSnippet(rawText.length() > 150 ? rawText.substring(0, 150) + "..." : rawText)
+                    .build());
+        }
+    }
+end
+
+// ==================== Rule 19: Monograph Missing Author ====================
+rule "Monograph Reference Missing Author Check"
+when
+    $ref: Reference(rawText.contains("[M]"))
+then
+    String rawText = $ref.getRawText();
+    int refNum = 0;
+    try {
+        String refId = $ref.getRefId();
+        if (refId != null && refId.length() > 0) {
+            String cleaned = refId.replaceAll("\\[|\\]", "").trim();
+            refNum = Integer.parseInt(cleaned);
+        }
+    } catch (Exception e) {}
+    if (refNum > 0) {
+        String afterNum = rawText;
+        int bracketEnd = rawText.indexOf("] ");
+        if (bracketEnd >= 0) afterNum = rawText.substring(bracketEnd + 2);
+        int dotIdx = afterNum.indexOf(". ");
+        if (dotIdx <= 0) {
+            results.add(Issue.newBuilder()
+                    .setCode("ERR_REF_MONO_NO_AUTHOR")
+                    .setMessage("Reference [" + refNum + "] monograph missing author name")
+                    .setSectionId(0).setSeverity(Severity.HIGH)
+                    .setSuggestion("请在题目前补充作者姓名")
+                    .setOriginalSnippet(rawText.length() > 150 ? rawText.substring(0, 150) + "..." : rawText)
+                    .build());
+        } else {
+            String beforeDot = afterNum.substring(0, dotIdx);
+            if (beforeDot.contains("[M]")) {
+                results.add(Issue.newBuilder()
+                        .setCode("ERR_REF_MONO_NO_AUTHOR")
+                        .setMessage("Reference [" + refNum + "] monograph missing author name")
+                        .setSectionId(0).setSeverity(Severity.HIGH)
+                        .setSuggestion("请在题目前补充作者姓名")
+                        .setOriginalSnippet(rawText.length() > 150 ? rawText.substring(0, 150) + "..." : rawText)
+                        .build());
+            }
+        }
+    }
+end
+
+// ==================== Rule 20: Unused Reference ====================
+rule "Unused Reference Check"
+when
+    $data: ParsedData()
+then
+    java.util.Set<String> citedRefs = new java.util.HashSet<>();
+    // Support [1], range [1-3] or [1–3], and comma-separated [12,13]
+    Pattern citationPattern = Pattern.compile("\\[(\\d+)\\]");
+    Pattern rangePattern = Pattern.compile("\\[(\\d+)[\\-\u2013](\\d+)\\]");
+    Pattern commaPattern = Pattern.compile("\\[(\\d+(?:[,\\s]+\\d+)+)\\]");
+    for (Section section : $data.getSectionsList()) {
+        if (section.getText() != null) {
+            String txt = section.getText();
+            // Expand range citations [1-3]
+            Matcher rm = rangePattern.matcher(txt);
+            while (rm.find()) {
+                try {
+                    int from = Integer.parseInt(rm.group(1));
+                    int to   = Integer.parseInt(rm.group(2));
+                    for (int i = from; i <= to; i++) citedRefs.add("[" + i + "]");
+                } catch (NumberFormatException e) {}
+            }
+            // Expand comma-separated citations [12,13]
+            Matcher cm = commaPattern.matcher(txt);
+            while (cm.find()) {
+                String[] parts = cm.group(1).split("[,\\s]+");
+                for (String part : parts) {
+                    try { citedRefs.add("[" + Integer.parseInt(part.trim()) + "]"); } catch (NumberFormatException e) {}
+                }
+            }
+            // Then single citations [1]
+            Matcher m = citationPattern.matcher(txt);
+            while (m.find()) {
+                citedRefs.add("[" + m.group(1) + "]");
+            }
+        }
+    }
+    for (com.auditor.grpc.Reference ref : $data.getReferencesList()) {
+        String refId = ref.getRefId();
+        if (refId != null && !citedRefs.contains(refId)) {
+            results.add(Issue.newBuilder()
+                    .setCode("WARN_REF_UNUSED")
+                    .setMessage("Reference " + refId + " is listed but not cited in the text")
+                    .setSectionId(0).setSeverity(Severity.LOW)
+                    .setSuggestion("请引用该文献或删除该条目")
+                    .setOriginalSnippet(ref.getRawText() != null ? ref.getRawText() : "")
+                    .build());
+        }
+    }
+end
+
+// ==================== Rule 21: Monograph Missing Place of Publication ====================
+// ERR_REF_MONO_NO_PLACE: has publisher keyword but no colon separator (no place)
+rule "Monograph Reference Missing Place Check"
+when
+    $ref: Reference(rawText.contains("[M]"))
+then
+    String rawText = $ref.getRawText();
+    int refNum = 0;
+    try {
+        String refId = $ref.getRefId();
+        if (refId != null && refId.length() > 0) {
+            String cleaned = refId.replaceAll("\\[|\\]", "").trim();
+            refNum = Integer.parseInt(cleaned);
+        }
+    } catch (Exception e) {}
+    if (refNum > 0) {
+        boolean hasPublisherKeyword = rawText.contains("\u51fa\u7248\u793e") || rawText.contains("\u51fa\u7248\u5c40") ||
+                                      rawText.contains("Press") || rawText.contains("Publisher") ||
+                                      rawText.contains("Publishing");
+        boolean hasColonSeparator = rawText.contains(":") || rawText.indexOf('\uff1a') >= 0;
+        // ERR_REF_MONO_NO_PLACE: has publisher but no colon (no place of publication)
+        if (hasPublisherKeyword && !hasColonSeparator) {
+            results.add(Issue.newBuilder()
+                    .setCode("ERR_REF_MONO_NO_PLACE")
+                    .setMessage("Reference [" + refNum + "] monograph missing place of publication")
+                    .setSectionId(0).setSeverity(Severity.HIGH)
+                    .setSuggestion("请在出版地前补充出版社，格式：出版地：出版社")
+                    .setOriginalSnippet(rawText.length() > 150 ? rawText.substring(0, 150) + "..." : rawText)
+                    .build());
+        }
+    }
+end
+
+// ==================== Rule 22: Monograph Missing Publisher (has place but no publisher) ====================
+// ERR_REF_MONO_NO_PUBLISHER (for rule22): has colon but no publisher keyword
+rule "Monograph Reference Missing Publisher Only Check"
+when
+    $ref: Reference(rawText.contains("[M]"))
+then
+    String rawText = $ref.getRawText();
+    int refNum = 0;
+    try {
+        String refId = $ref.getRefId();
+        if (refId != null && refId.length() > 0) {
+            String cleaned = refId.replaceAll("\\[|\\]", "").trim();
+            refNum = Integer.parseInt(cleaned);
+        }
+    } catch (Exception e) {}
+    if (refNum > 0) {
+        boolean hasPublisherKeyword = rawText.contains("\u51fa\u7248\u793e") || rawText.contains("\u51fa\u7248\u5c40") ||
+                                      rawText.contains("Press") || rawText.contains("Publisher") ||
+                                      rawText.contains("Publishing");
+        boolean hasColonSeparator = rawText.contains(":") || rawText.indexOf('\uff1a') >= 0;
+        // ERR_REF_MONO_NO_PUBLISHER: has colon (has place) but no publisher keyword
+        if (hasColonSeparator && !hasPublisherKeyword) {
+            results.add(Issue.newBuilder()
+                    .setCode("ERR_REF_MONO_NO_PUBLISHER")
+                    .setMessage("Reference [" + refNum + "] monograph missing publisher name")
+                    .setSectionId(0).setSeverity(Severity.HIGH)
+                    .setSuggestion("请在出版地后补充出版社名称，格式：出版地：出版社")
+                    .setOriginalSnippet(rawText.length() > 150 ? rawText.substring(0, 150) + "..." : rawText)
+                    .build());
+        }
+    }
+end
+
+// ==================== Rule 23: Thesis Missing University ====================
+rule "Thesis Reference Missing University Check"
+when
+    $ref: Reference(rawText.contains("[D]"))
+then
+    String rawText = $ref.getRawText();
+    int refNum = 0;
+    try {
+        String refId = $ref.getRefId();
+        if (refId != null && refId.length() > 0) {
+            String cleaned = refId.replaceAll("\\[|\\]", "").trim();
+            refNum = Integer.parseInt(cleaned);
+        }
+    } catch (Exception e) {}
+    if (refNum > 0) {
+        boolean hasUniv = rawText.contains("\u5927\u5b66") || rawText.contains("\u5b66\u9662") ||
+                          rawText.contains("\u5b66\u6821") || rawText.contains("\u7814\u7a76\u9662") ||
+                          rawText.contains("University") || rawText.contains("Institute") ||
+                          rawText.contains("College");
+        if (!hasUniv) {
+            results.add(Issue.newBuilder()
+                    .setCode("ERR_REF_THESIS_NO_UNIVERSITY")
+                    .setMessage("Reference [" + refNum + "] thesis missing degree-awarding institution")
+                    .setSectionId(0).setSeverity(Severity.HIGH)
+                    .setSuggestion("请补充学位授予单位名称")
+                    .setOriginalSnippet(rawText.length() > 150 ? rawText.substring(0, 150) + "..." : rawText)
+                    .build());
+        }
+    }
+end
+
+// ==================== Rule 24: Thesis Missing Year ====================
+rule "Thesis Reference Missing Year Check"
+when
+    $ref: Reference(rawText.contains("[D]"))
+then
+    String rawText = $ref.getRawText();
+    String yearText = stripDoiSuffix(rawText);
+    int refNum = 0;
+    try {
+        String refId = $ref.getRefId();
+        if (refId != null && refId.length() > 0) {
+            String cleaned = refId.replaceAll("\\[|\\]", "").trim();
+            refNum = Integer.parseInt(cleaned);
+        }
+    } catch (Exception e) {}
+    if (refNum > 0) {
+        Pattern yearPattern = Pattern.compile("(?:19|20)\\d{2}");
+        if (!yearPattern.matcher(yearText).find()) {
+            results.add(Issue.newBuilder()
+                    .setCode("ERR_REF_THESIS_NO_YEAR")
+                    .setMessage("Reference [" + refNum + "] thesis missing year")
+                    .setSectionId(0).setSeverity(Severity.HIGH)
+                    .setSuggestion("请补充论文年份")
+                    .setOriginalSnippet(rawText.length() > 150 ? rawText.substring(0, 150) + "..." : rawText)
+                    .build());
+        }
+    }
+end
+
+// ==================== Rule 25: Conference Missing Place ====================
+rule "Conference Reference Missing Place Check"
+when
+    $ref: Reference(rawText.contains("[C]"))
+then
+    String rawText = $ref.getRawText();
+    int refNum = 0;
+    try {
+        String refId = $ref.getRefId();
+        if (refId != null && refId.length() > 0) {
+            String cleaned = refId.replaceAll("\\[|\\]", "").trim();
+            refNum = Integer.parseInt(cleaned);
+        }
+    } catch (Exception e) {}
+    if (refNum > 0) {
+        // Place is present if there's a city name before the year
+        // Pattern: Chinese city (2+ chars) or English word followed by comma/full-width comma and year
+        Pattern placeYearPattern = Pattern.compile("[\u4e00-\u9fff]{2,}[,\uff0c]\\s*(?:19|20)\\d{2}|[A-Z][a-z]+[,\uff0c]\\s*(?:19|20)\\d{2}");
+        boolean hasPlace = placeYearPattern.matcher(rawText).find();
+        if (!hasPlace) {
+            results.add(Issue.newBuilder()
+                    .setCode("ERR_REF_CONF_NO_PLACE")
+                    .setMessage("Reference [" + refNum + "] conference missing place of conference")
+                    .setSectionId(0).setSeverity(Severity.MEDIUM)
+                    .setSuggestion("请在年份前补充会议地点")
+                    .setOriginalSnippet(rawText.length() > 150 ? rawText.substring(0, 150) + "..." : rawText)
+                    .build());
+        }
+    }
+end
+
+// ==================== Rule 26: Conference Missing Name ====================
+rule "Conference Reference Missing Name Check"
+when
+    $ref: Reference(rawText.contains("[C]"))
+then
+    String rawText = $ref.getRawText();
+    int refNum = 0;
+    try {
+        String refId = $ref.getRefId();
+        if (refId != null && refId.length() > 0) {
+            String cleaned = refId.replaceAll("\\[|\\]", "").trim();
+            refNum = Integer.parseInt(cleaned);
+        }
+    } catch (Exception e) {}
+    if (refNum > 0) {
+        boolean hasConfName = rawText.contains("//") || rawText.contains("Proceedings") ||
+                              rawText.contains("Conference") || rawText.contains("Symposium");
+        if (!hasConfName) {
+            results.add(Issue.newBuilder()
+                    .setCode("ERR_REF_CONF_NO_NAME")
+                    .setMessage("Reference [" + refNum + "] conference missing proceedings name")
+                    .setSectionId(0).setSeverity(Severity.HIGH)
+                    .setSuggestion("请在“//”后补充会议论文集名称")
+                    .setOriginalSnippet(rawText.length() > 150 ? rawText.substring(0, 150) + "..." : rawText)
+                    .build());
+        }
+    }
+end
+
+// ==================== Rule 27: Citation Order Check ====================
+rule "Citation Order Check"
+when
+    $data: ParsedData()
+then
+    // Check that citations appear in ascending order in the text
+    // Supports [1], range [1-3] or [1–3], and comma-separated [12,13]
+    Pattern citationPattern = Pattern.compile("\\[(\\d+)\\]");
+    Pattern rangePattern2 = Pattern.compile("\\[(\\d+)[\\-\u2013](\\d+)\\]");
+    Pattern commaPattern2 = Pattern.compile("\\[(\\d+(?:[,\\s]+\\d+)+)\\]");
+    int lastCitedNum = 0;
+    boolean orderError = false;
+    int errorCitedNum = 0;
+    int errorExpectedNum = 0;
+    outer:
+    for (Section section : $data.getSectionsList()) {
+        if (section.getText() != null) {
+            String txt2 = section.getText();
+            // Collect all citation positions in order: {textPos, minNum, maxNum}
+            java.util.List<int[]> positions = new java.util.ArrayList<>();
+            // 1. Range citations [1-3]
+            Matcher rm2 = rangePattern2.matcher(txt2);
+            while (rm2.find()) {
+                try {
+                    int from2 = Integer.parseInt(rm2.group(1));
+                    int to2   = Integer.parseInt(rm2.group(2));
+                    positions.add(new int[]{rm2.start(), rm2.end(), from2, to2});
+                } catch (NumberFormatException e) {}
+            }
+            // 2. Comma-separated citations [12,13]
+            Matcher cm2 = commaPattern2.matcher(txt2);
+            while (cm2.find()) {
+                String[] parts2 = cm2.group(1).split("[,\\s]+");
+                int minN = Integer.MAX_VALUE, maxN = 0;
+                for (String p : parts2) {
+                    try {
+                        int n = Integer.parseInt(p.trim());
+                        if (n < minN) minN = n;
+                        if (n > maxN) maxN = n;
+                    } catch (NumberFormatException e) {}
+                }
+                if (maxN > 0) positions.add(new int[]{cm2.start(), cm2.end(), minN, maxN});
+            }
+            // 3. Single citations [1] - skip if inside range or comma match
+            Matcher m = citationPattern.matcher(txt2);
+            while (m.find()) {
+                boolean covered = false;
+                for (int[] pos : positions) {
+                    if (m.start() >= pos[0] && m.end() <= pos[1]) { covered = true; break; }
+                }
+                if (!covered) {
+                    try {
+                        int n = Integer.parseInt(m.group(1));
+                        positions.add(new int[]{m.start(), m.end(), n, n});
+                    } catch (NumberFormatException e) {}
+                }
+            }
+            positions.sort((a, b) -> Integer.compare(a[0], b[0]));
+            for (int[] pos : positions) {
+                int citedNum = pos[2]; // min of range/comma group
+                if (citedNum < lastCitedNum) {
+                    orderError = true;
+                    errorCitedNum = citedNum;
+                    errorExpectedNum = lastCitedNum;
+                    break outer;
+                }
+                lastCitedNum = pos[3]; // max of range/comma group
+            }
+        }
+    }
+    if (orderError) {
+        results.add(Issue.newBuilder()
+                .setCode("REF_ORDER_001")
+                .setMessage("Citation order error: [" + errorCitedNum + "] appears after [" + errorExpectedNum + "]")
+                .setSectionId(0).setSeverity(Severity.MEDIUM)
+                .setSuggestion("请按升序重新排序引文")
+                .setOriginalSnippet("")
+                .build());
+    }
+end
+
+// ==================== Rule 28: Thesis Year Out of Range ====================
+rule "Thesis Reference Year Out of Range Check"
+when
+    $ref: Reference(rawText.contains("[D]"))
+then
+    String rawText = $ref.getRawText();
+    String yearText = stripDoiSuffix(rawText);
+    int refNum = 0;
+    try {
+        String refId = $ref.getRefId();
+        if (refId != null && refId.length() > 0) {
+            String cleaned = refId.replaceAll("\\[|\\]", "").trim();
+            refNum = Integer.parseInt(cleaned);
+        }
+    } catch (Exception e) {}
+    if (refNum > 0) {
+        Pattern yearPattern = Pattern.compile("[,\uff0c\\s]((?:19|20)\\d{2})[,\uff0c.\\s:\uff1a]");
+        Matcher m = yearPattern.matcher(yearText);
+        boolean found = false;
+        while (m.find() && !found) {
+            try {
+                int year = Integer.parseInt(m.group(1));
+                if (year > 2026) {
+                    results.add(Issue.newBuilder()
+                            .setCode("ERR_REF_MONO_YEAR_EXCEED")
+                            .setMessage("Reference [" + refNum + "] thesis year " + year + " > 2026")
+                            .setSectionId(0).setSeverity(Severity.HIGH)
+                            .setSuggestion("请检查年份是否正确")
+                            .setOriginalSnippet(rawText.length() > 150 ? rawText.substring(0, 150) + "..." : rawText)
+                            .build());
+                    found = true;
+                }
+            } catch (NumberFormatException e) {}
+        }
+    }
+end

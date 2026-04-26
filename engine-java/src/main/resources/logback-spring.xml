@@ -1,0 +1,56 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!--
+    logback-spring.xml
+    作用：强制所有日志输出使用 UTF-8 编码，彻底解决 Windows PowerShell/CMD 中文乱码问题。
+    原理：Spring Boot 优先加载此文件，其中的 <charset>UTF-8</charset> 会覆盖系统默认编码。
+-->
+<configuration>
+    <!-- 从 Spring 环境中读取 application.properties 的配置 -->
+    <springProperty scope="context" name="LOG_LEVEL_APP" source="logging.level.com.auditor.engine" defaultValue="INFO"/>
+    <springProperty scope="context" name="LOG_LEVEL_DROOLS" source="logging.level.org.drools" defaultValue="WARN"/>
+    <springProperty scope="context" name="LOG_LEVEL_GRPC" source="logging.level.io.grpc" defaultValue="INFO"/>
+
+    <!-- 控制台输出：强制 UTF-8，解决 Windows 乱码 -->
+    <appender name="CONSOLE" class="ch.qos.logback.core.ConsoleAppender">
+        <encoder class="ch.qos.logback.classic.encoder.PatternLayoutEncoder">
+            <!-- 强制使用 UTF-8 编码输出 -->
+            <charset>UTF-8</charset>
+            <pattern>%d{yyyy-MM-dd HH:mm:ss.SSS} [%thread] %-5level %logger{36} -- %msg%n</pattern>
+        </encoder>
+    </appender>
+
+    <!-- 文件输出：落盘到 logs/java.log，避免和 Python 日志混淆 -->
+    <appender name="FILE" class="ch.qos.logback.core.FileAppender">
+        <file>logs/java.log</file>
+        <append>true</append>
+        <encoder class="ch.qos.logback.classic.encoder.PatternLayoutEncoder">
+            <charset>UTF-8</charset>
+            <pattern>%d{yyyy-MM-dd HH:mm:ss.SSS} [%thread] %-5level %logger{36} -- %msg%n</pattern>
+        </encoder>
+    </appender>
+
+    <!-- 业务日志级别 -->
+    <logger name="com.auditor.engine" level="${LOG_LEVEL_APP}" additivity="false">
+        <appender-ref ref="CONSOLE"/>
+    </logger>
+
+    <!-- Drools 日志级别（设为 WARN 减少噪音） -->
+    <logger name="org.drools" level="${LOG_LEVEL_DROOLS}"/>
+    <logger name="org.kie" level="WARN"/>
+
+    <!-- gRPC 日志级别 -->
+    <logger name="io.grpc" level="${LOG_LEVEL_GRPC}"/>
+
+    <!-- Hibernate/JPA 日志（设为 WARN，避免大量 SQL 日志） -->
+    <logger name="org.hibernate" level="WARN"/>
+    <logger name="com.zaxxer.hikari" level="INFO"/>
+
+    <!-- Spring Batch 日志 -->
+    <logger name="org.springframework.batch" level="INFO"/>
+
+    <!-- 根日志级别 -->
+    <root level="INFO">
+        <appender-ref ref="CONSOLE"/>
+        <appender-ref ref="FILE"/>
+    </root>
+</configuration>
