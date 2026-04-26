@@ -10,7 +10,7 @@ from typing import Optional
 
 import uvicorn
 
-from .app import app
+from .app import app, include_routes
 from .config import settings
 from .startup import (
     _port_is_open,
