@@ -10,7 +10,8 @@ from typing import Optional
 
 import uvicorn
 
-from .app import app, include_routes
+from .app import app
+from .app import include_routes as _include_routes
 from .config import settings
 from .startup import (
     _port_is_open,
@@ -24,6 +25,10 @@ from .startup import (
 )
 
 log = logging.getLogger("paper_audit.main")
+
+
+def include_routes() -> None:
+    _include_routes()
 
 
 def run() -> None:
