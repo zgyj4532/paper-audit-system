@@ -581,6 +581,27 @@ def _compact_ai_review_for_report(ai_review: dict[str, Any]) -> dict[str, Any]:
     return compacted
 
 
+def _cleanup_uploaded_source(file_path: str) -> None:
+    try:
+        source_path = Path(file_path).resolve()
+    except Exception:
+        return
+
+    uploads_dir = settings.PYTHON_UPLOAD_DIR.resolve()
+    try:
+        source_path.relative_to(uploads_dir)
+    except ValueError:
+        return
+
+    if not source_path.exists() or not source_path.is_file():
+        return
+
+    try:
+        source_path.unlink()
+    except Exception:
+        logger.warning("failed to remove uploaded source file: %s", source_path)
+
+
 def _estimate_page_size(
     max_right: float, max_bottom: float, note_count: int
 ) -> tuple[float, float, float, float]:
@@ -1475,6 +1496,7 @@ async def _process_task(task_id: int, file_path: str, *, resume: bool = False) -
                 error_message=None,
                 checkpoint_data=json.dumps(checkpoint, ensure_ascii=False),
             )
+            _cleanup_uploaded_source(absolute_file_path)
         except Exception as exc:
             await tq.update_task(
                 task_id,
