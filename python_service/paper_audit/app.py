@@ -64,7 +64,7 @@ _configure_python_file_logging()
 async def lifespan(app: FastAPI):
     include_routes()
     try:
-        from .api.audit import resume_recoverable_tasks
+        from .api.audit_worker import resume_recoverable_tasks
 
         await resume_recoverable_tasks()
     except Exception:

@@ -71,7 +71,7 @@ def _ensure_pdf_from_report(
     output_dir: Path,
     report_payload: dict[str, Any],
 ) -> tuple[Path | None, list[str]]:
-    from ..api.audit import _render_pdf_annotation_report
+    from ..api.audit_rendering import _render_pdf_annotation_report
 
     pdf_path = output_dir / f"report_{task_id}.pdf"
     warnings = _render_pdf_annotation_report(report_payload, pdf_path)
