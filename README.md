@@ -1,10 +1,12 @@
 # paper-audit-system
 
-论文审查系统，由 Python 业务中台与 Rust 文档引擎组成。Python 负责上传接收、任务调度、AI 审查、报告生成、下载和管理接口；Rust 负责 DOCX 解析、排版建模与批注回写。文献验证采用本地 ChromaDB 召回候选文献，再由 Qwen API 给出最终核验结论。
+论文审查系统，由 Python 业务中台、Rust 文档引擎和 Java 规则引擎组成。Python 负责上传接收、任务调度、AI 审查、报告生成、下载和管理接口；Rust 负责 DOCX 解析、排版建模与批注回写；Java 规则引擎负责规则执行与共享数据结构对接。文献验证采用本地 ChromaDB 召回候选文献，再由 Qwen API 给出最终核验结论。
+
+English documentation: [README-en.md](README-en.md)
 
 ## 系统架构全景
 
-![系统架构图](assets/system-architecture.svg)
+![系统架构图](assets/system-architecture.png)
 
 ---
 
@@ -96,9 +98,9 @@ curl -L "http://127.0.0.1:8000/api/v1/download/1?type=zip" -o task_1.zip
 1. 用户通过 `POST /api/v1/audit` 上传 `.docx`。
 2. Python 保存文件，创建 SQLite 任务，并异步启动审查流程。
 3. Python 调用 Rust `/parse` 提取段落、样式、坐标和结构信息。
-4. Python 执行规则检查、切片审查、参考文献核验。
-5. 文献核验时先用 ChromaDB 召回，再把结果交给 Qwen API 做判定。
-6. Rust `/annotate` 写回批注，Python 生成 JSON、PDF 和 ZIP 报告。
+4. Python 将结构化结果交给 Java 规则引擎执行规则检查，并回收规则命中结果。
+5. Python 执行切片审查、参考文献核验，文献核验时先用 ChromaDB 召回，再把结果交给 Qwen API 做判定。
+6. Rust `/annotate` 写回批注，Python 汇总 Java 规则结果与 AI 审查结果，生成 JSON、PDF 和 ZIP 报告。
 
 ### 模块分层
 
@@ -109,6 +111,7 @@ curl -L "http://127.0.0.1:8000/api/v1/download/1?type=zip" -o task_1.zip
 - Rust 解析层：OpenXML 解析、样式树恢复、表格与公式识别。
 - Rust 排版层：坐标估算、页码映射、缩进换算。
 - Rust 批注层：comments.xml 注入、关系文件更新、批注回写。
+- Java 规则层：规则引擎、protobuf 对接和 Spring Boot 规则服务。
 
 ## 功能模块
 
@@ -408,6 +411,7 @@ paper-audit-system/
 ├── main.py
 ├── pyproject.toml
 ├── README.md
+├── README-en.md
 ├── .env.example
 ├── python_service/
 │   └── paper_audit/
@@ -415,6 +419,7 @@ paper-audit-system/
 │       ├── core/
 │       ├── services/
 │       └── main.py
+├── engine-java/
 └── rust_engine/
     ├── Cargo.toml
     └── src/
